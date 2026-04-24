@@ -134,6 +134,20 @@ Alertas inmunológicas del Humandato (sistema de salud del grafo).
 - **Moderada:** Dependientes activos con weight <= 1.0
 - **Baja:** Dependientes con pocas ocurrencias (posible falso positivo)
 
+**Arquitectura de vacunas (desde 2026-04-24):**
+
+Las vacunas tienen **scope project-agnostic**:
+
+- **Vacunas globales** (`scope: "global"`): Directivas universales que protegen a TODOS los proyectos. Si la vacuna existe sedimentada en CUALQUIER proyecto del grafo con weight suficiente, NO se reporta como faltante.
+  
+  Ejemplos: emoji, stdout.flush, git push, 3 intentos, delete()
+
+- **Vacunas project-specific** (`scope: "project_specific"`): Directivas que solo aplican a proyectos declarados en `applicable_projects`. Solo se verifican cuando se consulta un proyecto aplicable.
+  
+  Ejemplos: YAML (solo concept-sediment), catalogo (solo inducop)
+
+**Implicación operacional:** Una vacuna global sedimentada en proyecto "inducop" protege también a "concept-sediment". No es necesario sedimentar la misma vacuna en cada proyecto.
+
 ---
 
 ## 🚀 Deployment (Railway)
