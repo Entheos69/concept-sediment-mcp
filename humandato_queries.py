@@ -19,8 +19,13 @@ from db import get_session
 # ════════════════════════════════════════════════════════════════
 
 VCM_DIRECTIVES = [
+    # ════════════════════════════════════════════════════════════════
+    # VACUNAS GLOBALES: aplican a todos los proyectos
+    # Si existen en CUALQUIER proyecto del grafo, protegen a TODOS
+    # ════════════════════════════════════════════════════════════════
     {
         "name": "emoji",
+        "scope": "global",
         "category": "encoding",
         "severity": "critical",
         "directive": (
@@ -34,6 +39,7 @@ VCM_DIRECTIVES = [
     },
     {
         "name": "stdout.flush",
+        "scope": "global",
         "category": "encoding",
         "severity": "critical",
         "directive": (
@@ -46,6 +52,7 @@ VCM_DIRECTIVES = [
     },
     {
         "name": "git push",
+        "scope": "global",
         "category": "workflow",
         "severity": "critical",
         "directive": (
@@ -58,6 +65,7 @@ VCM_DIRECTIVES = [
     },
     {
         "name": "3 intentos",
+        "scope": "global",
         "category": "workflow",
         "severity": "critical",
         "directive": (
@@ -69,7 +77,24 @@ VCM_DIRECTIVES = [
         "failure_history": "Violada 3 veces (S17, S18, S20).",
     },
     {
+        "name": "delete()",
+        "scope": "global",
+        "category": "django_db",
+        "severity": "high",
+        "directive": (
+            "NUNCA usar .delete() en produccion sin autorizacion. "
+            "Preferir soft-delete o archivado."
+        ),
+        "min_weight": 0.3,
+        "failure_history": "Documentada en sistema de diseno.",
+    },
+    # ════════════════════════════════════════════════════════════════
+    # VACUNAS PROJECT-SPECIFIC: aplican solo a proyectos declarados
+    # ════════════════════════════════════════════════════════════════
+    {
         "name": "YAML",
+        "scope": "project_specific",
+        "applicable_projects": ["concept-sediment"],
         "category": "concept_sediment",
         "severity": "critical",
         "directive": (
@@ -81,18 +106,9 @@ VCM_DIRECTIVES = [
         "failure_history": "S060: 0 YAML. S061: sin archivo. S063: confabulacion.",
     },
     {
-        "name": "delete()",
-        "category": "django_db",
-        "severity": "high",
-        "directive": (
-            "NUNCA usar .delete() en produccion sin autorizacion. "
-            "Preferir soft-delete o archivado."
-        ),
-        "min_weight": 0.3,
-        "failure_history": "Documentada en sistema de diseno.",
-    },
-    {
         "name": "catalogo",
+        "scope": "project_specific",
+        "applicable_projects": ["inducop"],
         "category": "css_design",
         "severity": "medium",
         "directive": (
@@ -211,7 +227,11 @@ LIMIT 1
 
 
 def get_missing_vaccines(project: Optional[str] = None) -> list[dict]:
-    """Detecta vacunas faltantes: directivas VCM sin representación suficiente."""
+    """Detecta vacunas faltantes: directivas VCM sin representación suficiente.
+
+    Vacunas globales: buscan en TODO el grafo (project-agnostic).
+    Vacunas project-specific: solo verifican en proyectos aplicables.
+    """
     session = get_session()
     try:
         missing = []
@@ -220,13 +240,25 @@ def get_missing_vaccines(project: Optional[str] = None) -> list[dict]:
             pattern = f"%{vcm['name']}%"
             params = {"pattern": pattern}
 
-            sql = VACCINES_CHECK_SQL
-            if project:
-                sql = sql.replace(
+            # Determinar scope (default: global para retrocompatibilidad)
+            scope = vcm.get("scope", "global")
+
+            # PROJECT-SPECIFIC: verificar si aplica al proyecto consultado
+            if scope == "project_specific":
+                applicable = vcm.get("applicable_projects", [])
+                if project and project not in applicable:
+                    # Skip - esta vacuna no aplica a este proyecto
+                    continue
+                # Aplicar filtro de proyecto
+                sql = VACCINES_CHECK_SQL.replace(
                     "WHERE c.name",
                     "WHERE :project = ANY(c.projects) AND c.name"
                 )
                 params["project"] = project
+
+            # GLOBAL: buscar en TODO el grafo (sin filtro de proyecto)
+            else:
+                sql = VACCINES_CHECK_SQL
 
             row = session.execute(text(sql), params).fetchone()
 
@@ -277,7 +309,7 @@ FROM graph_conceptrelation cr
 JOIN graph_concept source ON source.id = cr.source_id
 WHERE cr.target_id = :concept_id
   AND source.status = 'active'
-  AND cr.relation_type IN ('refines', 'resolves', 'instance_of')
+  AND cr.relation_type IN ('refines', 'resolves', 'instance_of', 'supersedes')
 """
 
 
