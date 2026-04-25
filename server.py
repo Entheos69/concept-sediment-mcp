@@ -4,7 +4,7 @@ Concept Sediment — MCP Server
 Servidor MCP con transporte Streamable HTTP (stateless, JSON responses)
 para exponer el grafo de conceptos a claude.ai y otros consumidores MCP.
 
-7 Tools:
+8 Tools:
   - cs_search_concepts:      búsqueda semántica por query
   - cs_get_active_concepts:  conceptos activos por dominio/proyecto
   - cs_get_concept_graph:    grafo alrededor de un concepto
@@ -12,6 +12,7 @@ para exponer el grafo de conceptos a claude.ai y otros consumidores MCP.
   - cs_get_session_context:  contexto filtrado para iniciar sesión
   - cs_get_alerts:           alertas inmunológicas (fracturas + vacunas)
   - cs_session_open:         apertura MTV (multi-query + alerts en 1 call)
+  - cs_audit_thread:         cobertura batch de un hilo de conceptos (D-T4)
 
 Uso:
   python server.py                            # Streamable HTTP en :8000
@@ -493,6 +494,123 @@ def cs_session_open(params: SessionOpenInput) -> str:
         "concepts_ranked": deduped_ranked,
         "concepts_per_query": per_query_results,
         "alerts": alerts,
+    }, ensure_ascii=False, indent=2, default=str)
+
+
+# ════════════════════════════════════════════════════════════════
+# TOOL 8: cs_audit_thread
+# ════════════════════════════════════════════════════════════════
+
+class AuditThreadInput(BaseModel):
+    """Parámetros para auditar cobertura de un hilo de conceptos en el grafo."""
+    concepts: list[str] = Field(
+        ...,
+        description=(
+            "Nombres (o substrings) de los conceptos del hilo que se "
+            "quieren verificar. Búsqueda por texto ILIKE — útil cuando "
+            "se conocen los nombres exactos o aproximados, a diferencia "
+            "de cs_search_concepts que usa embeddings."
+        ),
+        min_length=1,
+        max_length=20,
+    )
+    project: Optional[str] = Field(
+        default=None,
+        description="Filtra por proyecto (aplica a todas las búsquedas)",
+    )
+    include_graph: bool = Field(
+        default=True,
+        description=(
+            "Si True, para el top match de cada concepto agrega "
+            "relaciones entrantes/salientes (top 5) y ocurrencias "
+            "recientes (top 3). Si False, solo presencia y metadata."
+        ),
+    )
+
+
+@mcp.tool(
+    name="cs_audit_thread",
+    annotations={
+        "title": "Audit Thread Coverage",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+def cs_audit_thread(params: AuditThreadInput) -> str:
+    """Audita en una sola llamada la cobertura de un hilo de conceptos.
+
+    Para cada nombre de concepto en la lista:
+      - Busca por texto ILIKE (top 3 matches)
+      - Reporta status, weight, type, dominios, last_seen del top match
+      - Lista alternative matches por nombre
+      - Si include_graph: agrega relaciones y ocurrencias del top match
+
+    Sustituye los pasos manuales de Tactic 011 (auditoría manual de hilo).
+    Diseñado para implementar la norma D-T4 (chequeo recursivo pre-sesión).
+
+    Caller provee la lista de conceptos esperados — el tool no infiere
+    el hilo, solo verifica la presencia y trayectoria de lo que se pide.
+    No toma decisiones metodológicas: solo compone tools existentes.
+    """
+    coverage = []
+    by_status = {
+        "active": 0,
+        "dormant": 0,
+        "archived": 0,
+        "no_encontrado": 0,
+    }
+
+    for concept_name in params.concepts:
+        results = search_concepts_by_text(
+            query=concept_name,
+            project=params.project,
+            limit=3,
+        )
+
+        if not results:
+            coverage.append({
+                "thread_name": concept_name,
+                "status": "no_encontrado",
+                "matches": [],
+            })
+            by_status["no_encontrado"] += 1
+            continue
+
+        top = results[0]
+        entry = {
+            "thread_name": concept_name,
+            "matched_concept": top["name"],
+            "status": top["status"],
+            "weight": top["weight"],
+            "type": top["type"],
+            "domains": top["domains"],
+            "last_seen": top.get("last_seen"),
+            "alt_matches": [r["name"] for r in results[1:]],
+        }
+        by_status[top["status"]] = by_status.get(top["status"], 0) + 1
+
+        if params.include_graph:
+            graph_data = get_concept_with_relations(
+                concept_name=top["name"],
+                depth=1,
+            )
+            if graph_data:
+                entry["outgoing_relations"] = graph_data["outgoing_relations"][:5]
+                entry["incoming_relations"] = graph_data["incoming_relations"][:5]
+                entry["recent_occurrences"] = graph_data["recent_occurrences"][:3]
+
+        coverage.append(entry)
+
+    return json.dumps({
+        "summary": {
+            "total_thread_items": len(params.concepts),
+            "found_in_graph": len(params.concepts) - by_status["no_encontrado"],
+            "missing_from_graph": by_status["no_encontrado"],
+            "by_status": by_status,
+        },
+        "coverage": coverage,
     }, ensure_ascii=False, indent=2, default=str)
 
 
