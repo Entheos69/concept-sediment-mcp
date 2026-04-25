@@ -4,13 +4,14 @@ Concept Sediment — MCP Server
 Servidor MCP con transporte Streamable HTTP (stateless, JSON responses)
 para exponer el grafo de conceptos a claude.ai y otros consumidores MCP.
 
-6 Tools:
+7 Tools:
   - cs_search_concepts:      búsqueda semántica por query
   - cs_get_active_concepts:  conceptos activos por dominio/proyecto
   - cs_get_concept_graph:    grafo alrededor de un concepto
   - cs_get_domain_summary:   resumen narrativo de un dominio
   - cs_get_session_context:  contexto filtrado para iniciar sesión
   - cs_get_alerts:           alertas inmunológicas (fracturas + vacunas)
+  - cs_session_open:         apertura MTV (multi-query + alerts en 1 call)
 
 Uso:
   python server.py                            # Streamable HTTP en :8000
@@ -387,6 +388,112 @@ def cs_get_alerts(params: GetAlertsInput) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+# ════════════════════════════════════════════════════════════════
+# TOOL 7: cs_session_open
+# ════════════════════════════════════════════════════════════════
+
+class SessionOpenInput(BaseModel):
+    """Parámetros para apertura asistida de sesión via Marco Teórico Vivo."""
+    topic: str = Field(
+        ...,
+        description="Tema de la sesión (label informativo, no afecta búsqueda)",
+        min_length=1,
+        max_length=300,
+    )
+    queries: list[str] = Field(
+        ...,
+        description=(
+            "2-3 queries que reflejan el tema desde ángulos distintos. "
+            "Cada query se ejecuta como cs_search_concepts y los "
+            "resultados se deduplican por nombre."
+        ),
+        min_length=1,
+        max_length=5,
+    )
+    domain: Optional[str] = Field(
+        default=None,
+        description="Filtro opcional de dominio (slug). Aplica a todas las queries.",
+    )
+    project: Optional[str] = Field(
+        default=None,
+        description="Filtro opcional de proyecto. Aplica a queries y a alertas.",
+    )
+    limit_per_query: int = Field(default=5, ge=1, le=15)
+
+
+@mcp.tool(
+    name="cs_session_open",
+    annotations={
+        "title": "Open Session with Living Theoretical Framework (MTV)",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+def cs_session_open(params: SessionOpenInput) -> str:
+    """Apertura asistida de sesión via Marco Teórico Vivo (MTV).
+
+    Compone múltiples cs_search_concepts (uno por query) + cs_get_alerts
+    en una sola invocación. Devuelve paquete de apertura con:
+      - concepts_ranked: conceptos deduplicados por nombre, rankeados
+        por mejor similaridad observada entre las queries.
+      - concepts_per_query: resultados crudos por query, para distinguir
+        qué ángulo trajo qué.
+      - alerts: alertas inmunológicas activas.
+
+    Diseñado para reducir fricción del protocolo MTV de 3-5 tool calls
+    a 1. Caller provee las queries desde ángulos distintos del tema —
+    el tool NO genera ángulos internamente porque cada agente conoce
+    mejor qué ángulos importan para su dominio.
+
+    No toma decisiones metodológicas: solo compone tools existentes.
+    """
+    per_query_results = {}
+    all_concepts = {}  # name -> mejor result observado entre queries
+
+    for q in params.queries:
+        results = search_concepts_by_embedding(
+            query=q,
+            domain=params.domain,
+            project=params.project,
+            limit=params.limit_per_query,
+        )
+        if not results:
+            results = search_concepts_by_text(
+                query=q,
+                domain=params.domain,
+                project=params.project,
+                limit=params.limit_per_query,
+            )
+        per_query_results[q] = results
+
+        for r in results:
+            name = r["name"]
+            sim = r.get("similarity", 0.0) or 0.0
+            existing = all_concepts.get(name)
+            existing_sim = (existing.get("similarity", 0.0) or 0.0) if existing else -1
+            if sim > existing_sim:
+                all_concepts[name] = r
+
+    deduped_ranked = sorted(
+        all_concepts.values(),
+        key=lambda r: r.get("similarity", 0.0) or 0.0,
+        reverse=True,
+    )
+
+    alerts = get_all_alerts(project=params.project)
+
+    return json.dumps({
+        "topic": params.topic,
+        "queries_count": len(params.queries),
+        "concepts_total_unique": len(deduped_ranked),
+        "concepts_ranked": deduped_ranked,
+        "concepts_per_query": per_query_results,
+        "alerts": alerts,
+    }, ensure_ascii=False, indent=2, default=str)
 
 
 # ── App con health check + MCP ──
