@@ -28,6 +28,11 @@ def init_audit_log_table() -> None:
 
     Ejecutar al startup del MCP server antes de aceptar requests.
     Lee el SQL de migrations/001_audit_log.sql y ejecuta cada statement.
+
+    Strip comments line-by-line ANTES de split(";"). El bug previo
+    descartaba el CREATE TABLE porque el primer chunk del split incluia
+    los comentarios del header + el CREATE TABLE pegados, y .startswith("--")
+    devolvia True para el chunk entero.
     """
     sql_file = MIGRATIONS_DIR / "001_audit_log.sql"
     if not sql_file.exists():
@@ -35,11 +40,19 @@ def init_audit_log_table() -> None:
 
     sql_content = sql_file.read_text(encoding="utf-8")
 
+    cleaned_lines = []
+    for line in sql_content.splitlines():
+        comment_idx = line.find("--")
+        if comment_idx >= 0:
+            line = line[:comment_idx]
+        cleaned_lines.append(line)
+    sql_clean = "\n".join(cleaned_lines)
+
     session = get_session()
     try:
-        for stmt in sql_content.split(";"):
+        for stmt in sql_clean.split(";"):
             stmt = stmt.strip()
-            if stmt and not stmt.startswith("--"):
+            if stmt:
                 session.execute(text(stmt))
         session.commit()
         logger.info("mcp_audit_log table initialized (idempotent)")
