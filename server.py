@@ -4,7 +4,9 @@ Concept Sediment — MCP Server
 Servidor MCP con transporte Streamable HTTP (stateless, JSON responses)
 para exponer el grafo de conceptos a claude.ai y otros consumidores MCP.
 
-8 Tools:
+10 Tools (8 read + 1 write + 1 audit-read):
+
+Tools de lectura (no modifican estado):
   - cs_search_concepts:      búsqueda semántica por query
   - cs_get_active_concepts:  conceptos activos por dominio/proyecto
   - cs_get_concept_graph:    grafo alrededor de un concepto
@@ -13,6 +15,10 @@ para exponer el grafo de conceptos a claude.ai y otros consumidores MCP.
   - cs_get_alerts:           alertas inmunológicas (fracturas + vacunas)
   - cs_session_open:         apertura MTV (multi-query + alerts en 1 call)
   - cs_audit_thread:         cobertura batch de un hilo de conceptos (D-T4)
+  - cs_get_audit_log:        consulta read-only del audit log
+
+Tools de escritura (con audit log append-only obligatorio):
+  - cs_record_measurement:   registra medición compuesta IA-humano (D2)
 
 Uso:
   python server.py                            # Streamable HTTP en :8000
@@ -41,17 +47,20 @@ from queries import (
     get_session_context_data,
 )
 from humandato_queries import get_all_alerts
+from write_queries import record_measurement
+from audit_queries import init_audit_log_table, get_audit_log
 
 # ── Configuración ──
 MCP_PORT = int(os.environ.get("MCP_PORT", os.environ.get("PORT", "8000")))
 MCP_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
 
 
-# ── Lifespan: conexión a DB ──
+# ── Lifespan: conexión a DB + init audit log ──
 @asynccontextmanager
 async def app_lifespan(server):
-    """Inicializa pool de conexiones al arrancar, cierra al parar."""
+    """Inicializa pool de conexiones + audit log al arrancar, cierra al parar."""
     engine = get_engine()
+    init_audit_log_table()
     yield {"engine": engine}
     dispose_engine()
 
@@ -611,6 +620,182 @@ def cs_audit_thread(params: AuditThreadInput) -> str:
             "by_status": by_status,
         },
         "coverage": coverage,
+    }, ensure_ascii=False, indent=2, default=str)
+
+
+# ════════════════════════════════════════════════════════════════
+# WRITE TOOLS (con audit log append-only obligatorio)
+# ════════════════════════════════════════════════════════════════
+#
+# Disciplina §2 del Estratega: tools write con prefijo cs_record_*/
+# cs_promote_*, módulo separado (write_queries.py), audit log obligatorio.
+#
+# Cada invocación registra entrada en mcp_audit_log con timestamp, agent,
+# payload, target_id. Append-only por convención de código.
+# ════════════════════════════════════════════════════════════════
+
+# ════════════════════════════════════════════════════════════════
+# TOOL 9: cs_record_measurement (write)
+# ════════════════════════════════════════════════════════════════
+
+class RecordMeasurementInput(BaseModel):
+    """Parámetros para registrar medición compuesta IA-humano."""
+    contexto: str = Field(
+        ...,
+        description=(
+            "Descripción del problema/sesión donde ocurrió la medición. "
+            "Sin schema interno (per protocolo Estratega §5)."
+        ),
+        min_length=1,
+    )
+    outcome: str = Field(
+        ...,
+        description=(
+            "Uno de: 'resolvio', 'resolvio_parcial', 'no_resolvio', "
+            "'aun_no_observable'. Mutuamente excluyentes (protocolo Estratega §3)."
+        ),
+    )
+    contribucion_ia: str = Field(
+        default="",
+        description="Aporte de la IA (superposición propuesta). Puede ser vacío.",
+    )
+    contribucion_humana: str = Field(
+        default="",
+        description="Aporte del humano (colapso elegido + criterio). Puede ser vacío.",
+    )
+    project: str = Field(
+        default="",
+        description="Tag de proyecto (ej: 'inducop', 'concept-sediment-mcp')",
+        max_length=50,
+    )
+    domains: Optional[list[str]] = Field(
+        default=None,
+        description=(
+            "Lista de slugs de graph_domain. Cada slug debe existir; si "
+            "alguno no existe, falla la medición completa (no se crean "
+            "domains silenciosamente)."
+        ),
+    )
+    agent: str = Field(
+        default="unknown",
+        description=(
+            "Caller declara su identidad (CodeMCP, CodeCS, Cowork, Bib, "
+            "Web, ...). Queda en audit log para trazabilidad."
+        ),
+        max_length=50,
+    )
+
+
+@mcp.tool(
+    name="cs_record_measurement",
+    annotations={
+        "title": "Record IA-Human Measurement",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+def cs_record_measurement(params: RecordMeasurementInput) -> str:
+    """Registra una medición compuesta IA-humano en graph_measurement.
+
+    Per protocolo Estratega §4 y schema D2 agnóstico al operador
+    (concepto active w:1.0 en grafo). NO sedimenta en grafo conceptual —
+    measurements viven en tabla aparte, fuera del espacio de búsqueda
+    semántica. Esto es deliberado para evitar la patología que F37
+    diagnostica.
+
+    Validaciones:
+      - outcome ∈ {resolvio, resolvio_parcial, no_resolvio, aun_no_observable}
+      - contexto no vacío
+      - todos los domain slugs existen en graph_domain
+
+    Cada invocación (success o failure) deja entrada en mcp_audit_log.
+    Transacción atómica: si algo falla, NADA queda en graph_measurement
+    pero SÍ queda registro de error en mcp_audit_log.
+
+    NO juzga calidad del contexto/contribución, NO infiere outcome,
+    NO sub-categoriza (per protocolo Estratega §5 — no validador automático).
+    """
+    try:
+        result = record_measurement(
+            contexto=params.contexto,
+            outcome=params.outcome,
+            contribucion_ia=params.contribucion_ia,
+            contribucion_humana=params.contribucion_humana,
+            project=params.project,
+            domains=params.domains,
+            agent=params.agent,
+        )
+        return json.dumps({"ok": True, **result}, ensure_ascii=False, indent=2)
+    except ValueError as e:
+        return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False, indent=2)
+
+
+# ════════════════════════════════════════════════════════════════
+# AUDIT TOOLS (read-only sobre mcp_audit_log)
+# ════════════════════════════════════════════════════════════════
+
+# ════════════════════════════════════════════════════════════════
+# TOOL 10: cs_get_audit_log (read)
+# ════════════════════════════════════════════════════════════════
+
+class GetAuditLogInput(BaseModel):
+    """Parámetros para consulta del audit log."""
+    agent: Optional[str] = Field(
+        default=None,
+        description="Filtrar por agent (ej: 'CodeMCP', 'CodeCS')",
+    )
+    tool_name: Optional[str] = Field(
+        default=None,
+        description="Filtrar por nombre exacto del tool (ej: 'cs_record_measurement')",
+    )
+    target_id: Optional[str] = Field(
+        default=None,
+        description="Filtrar por UUID del recurso afectado (ej: measurement.id)",
+    )
+    success: Optional[bool] = Field(
+        default=None,
+        description="Filtrar por éxito (true) o fracaso (false) del write",
+    )
+    since: Optional[str] = Field(
+        default=None,
+        description="ISO datetime — solo entradas posteriores (ej: '2026-04-25T00:00:00')",
+    )
+    limit: int = Field(default=50, ge=1, le=200)
+
+
+@mcp.tool(
+    name="cs_get_audit_log",
+    annotations={
+        "title": "Get MCP Audit Log",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+def cs_get_audit_log(params: GetAuditLogInput) -> str:
+    """Consulta read-only del audit log de write tools.
+
+    Permite verificar: qué agentes invocaron qué writes, con qué payload,
+    cuáles tuvieron éxito, qué errores produjeron. Base operativa de D5
+    (revisabilidad de matriz centaura) cuando llegue.
+
+    Append-only: las entradas no se editan ni borran. Esta tool solo
+    consulta — no modifica estado.
+    """
+    rows = get_audit_log(
+        agent=params.agent,
+        tool_name=params.tool_name,
+        target_id=params.target_id,
+        success=params.success,
+        since=params.since,
+        limit=params.limit,
+    )
+    return json.dumps({
+        "count": len(rows),
+        "entries": rows,
     }, ensure_ascii=False, indent=2, default=str)
 
 
