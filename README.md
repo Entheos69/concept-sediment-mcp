@@ -26,7 +26,7 @@ Diseñado para proveer memoria semántica persistente a agentes AI (Claude Code,
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
 │  FastMCP + Uvicorn (Python 3.12)                            │
-│  └─> 7 MCP Tools (read-only)                                │
+│  └─> 10 MCP Tools (9 read + 1 write con audit log)          │
 │                                                              │
 │  ┌────────────────────┐         ┌──────────────────────┐    │
 │  │  queries.py        │────────>│  PostgreSQL 14+      │    │
@@ -54,7 +54,25 @@ Diseñado para proveer memoria semántica persistente a agentes AI (Claude Code,
 └───────────────────────┘
 ```
 
-**Base de datos compartida:** El servidor MCP comparte la misma instancia PostgreSQL que el proyecto Django `concept-sediment`. El servidor es **read-only** — solo consulta el grafo, no lo modifica.
+**Base de datos compartida:** El servidor MCP comparte la misma instancia PostgreSQL que el proyecto Django `concept-sediment`.
+
+**Política de escritura:** El servidor escribe al grafo solo a través de tools `cs_record_*` y `cs_promote_*`, con audit log append-only obligatorio (tabla `mcp_audit_log`). Las tools de lectura no modifican estado. Cada invocación de write tool registra timestamp, agent, payload y target_id en `mcp_audit_log`.
+
+### Inventario de tools por categoría
+
+**Tools de lectura (no modifican estado):**
+- `cs_search_concepts`
+- `cs_get_active_concepts`
+- `cs_get_concept_graph`
+- `cs_get_domain_summary`
+- `cs_get_session_context`
+- `cs_get_alerts`
+- `cs_session_open`
+- `cs_audit_thread`
+- `cs_get_audit_log`
+
+**Tools de escritura (con audit log obligatorio):**
+- `cs_record_measurement`
 
 ---
 
@@ -172,6 +190,58 @@ Apertura asistida de sesión via Marco Teórico Vivo (MTV). Compone múltiples `
 
 ---
 
+### 8. `cs_audit_thread`
+Auditoría batch de cobertura de un hilo de conceptos en el grafo. Implementa la norma D-T4 (chequeo recursivo pre-sesión).
+
+**Parámetros:**
+- `concepts` (list[string], required, 1-20): Nombres (o substrings) de los conceptos del hilo a verificar. Búsqueda por texto ILIKE (tilde-sensitive)
+- `project` (string, optional): Filtrar por proyecto en todas las búsquedas
+- `include_graph` (bool, default=true): Si true, agrega relaciones (top 5) y ocurrencias recientes (top 3) del top match
+
+**Retorna:**
+- `summary`: total, encontrados/faltantes, distribución por status
+- `coverage`: por cada thread_name → matched_concept, status, weight, type, domains, last_seen, alt_matches, (opcional) outgoing_relations + incoming_relations + recent_occurrences
+
+**Limitación documentada:** búsqueda ILIKE es tilde-sensitive. Si un concepto del hilo tiene tildes, incluir variantes con/sin tilde.
+
+---
+
+### 9. `cs_record_measurement` *(write)*
+Registra una medición compuesta IA-humano en `graph_measurement`. Per protocolo Estratega §4 y schema D2 agnóstico al operador.
+
+**Parámetros:**
+- `contexto` (string, required, no vacío): Descripción del problema/sesión donde ocurrió la medición
+- `outcome` (string, required): Uno de `resolvio`, `resolvio_parcial`, `no_resolvio`, `aun_no_observable`
+- `contribucion_ia` (string, optional, default=""): Aporte de la IA (superposición propuesta)
+- `contribucion_humana` (string, optional, default=""): Aporte del humano (colapso elegido + criterio)
+- `project` (string, optional, default=""): Tag de proyecto
+- `domains` (list[string], optional): Lista de slugs de `graph_domain`. Cada slug debe existir
+- `agent` (string, default="unknown"): Caller declara su identidad para audit log
+
+**Retorna:** `{ok, id, created_at, audit_id}` en éxito; `{ok: false, error}` en fallo de validación.
+
+**Comportamiento clave:**
+- **NO sedimenta en grafo conceptual** — measurements viven en tabla aparte (`graph_measurement`), fuera del espacio de búsqueda semántica. Esto es deliberado para evitar la patología F37.
+- **Transacción atómica:** INSERT measurement + INSERT m2m domains + INSERT audit log se commitean juntos. Si algo falla, NADA queda en `graph_measurement` pero SÍ queda registro de error en `mcp_audit_log`.
+- **Validaciones (per protocolo Estratega §5):** outcome ∈ enum, contexto no vacío, domain slugs existen. NO juzga "calidad" del contenido, NO infiere outcome, NO sub-categoriza.
+
+---
+
+### 10. `cs_get_audit_log`
+Consulta read-only del audit log de write tools (`mcp_audit_log`). Base operativa de D5 (revisabilidad de matriz centaura).
+
+**Parámetros (todos opcionales):**
+- `agent` (string): Filtrar por agent (ej: `CodeMCP`, `CodeCS`)
+- `tool_name` (string): Filtrar por nombre exacto del tool
+- `target_id` (string UUID): Filtrar por recurso afectado
+- `success` (bool): Filtrar por éxito/fracaso
+- `since` (ISO datetime): Solo entradas posteriores
+- `limit` (int, default=50, max=200)
+
+**Retorna:** `{count, entries: [...]}` ordenado por timestamp DESC. Cada entry incluye id, timestamp, agent, tool_name, payload, target_id, target_table, success, error_message.
+
+---
+
 ## 🚀 Deployment (Railway)
 
 **Proyecto:** `balanced-determination`
@@ -208,10 +278,14 @@ curl https://mcp-server-production-994a.up.railway.app/health
 
 ```
 concept-sediment-mcp/
-├── server.py              # FastMCP app + Uvicorn server
-├── queries.py             # SQL queries para 5 tools MCP
-├── humandato_queries.py   # Alertas inmunológicas (VCM)
-├── db.py                  # SQLAlchemy engine + sessions
+├── server.py              # FastMCP app + Uvicorn server (registra 10 tools)
+├── queries.py             # SQL queries para 5 read tools del grafo
+├── humandato_queries.py   # Alertas inmunológicas (VCM) — read tools
+├── write_queries.py       # SQL para write tools (cs_record_*)
+├── audit_queries.py       # Init mcp_audit_log + read tools sobre audit
+├── migrations/
+│   └── 001_audit_log.sql  # Schema mcp_audit_log (idempotente al startup)
+├── db.py                  # SQLAlchemy engine + sessions stateless
 ├── requirements.txt       # Dependencias Python
 ├── Dockerfile             # Build config para Railway
 ├── railway.toml           # Deploy config
@@ -267,12 +341,17 @@ python server.py
 
 ## 📊 Base de datos (PostgreSQL + pgvector)
 
-**Tablas principales:**
+**Tablas principales (Django app `graph`):**
 - `graph_concept`: Conceptos (name, type, status, weight, embedding)
 - `graph_conceptrelation`: Relaciones entre conceptos
 - `graph_domain`: Dominios de conocimiento
 - `graph_sessionlog`: Log de sesiones procesadas
 - `graph_conceptoccurrence`: Ocurrencias de conceptos en sesiones
+- `graph_measurement`: Mediciones compuestas IA-humano (D2, ver tool 9)
+- `graph_measurement_domains`: M2M measurement ↔ domain
+
+**Tablas del MCP (no del grafo conceptual):**
+- `mcp_audit_log`: Audit append-only de write tools del MCP server
 
 **Extensión pgvector:** Habilita búsquedas semánticas con embeddings.
 
@@ -298,7 +377,7 @@ LIMIT 10;
 
 ## 🔒 Seguridad
 
-- **Read-only:** El servidor NO modifica el grafo, solo consulta
+- **Política write/read:** El servidor escribe al grafo solo a través de tools `cs_record_*` y `cs_promote_*`, con audit log append-only obligatorio. Las tools de lectura no modifican estado.
 - **Variables sensibles:** `OPENAI_API_KEY` y `DATABASE_URL` en variables de entorno (nunca en código)
 - **CORS:** Configurado para aceptar conexiones desde cliente MCP oficial
 - **Rate limiting:** Implementado por Railway (no en código)
