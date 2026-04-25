@@ -26,14 +26,17 @@ Diseñado para proveer memoria semántica persistente a agentes AI (Claude Code,
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
 │  FastMCP + Uvicorn (Python 3.12)                            │
-│  └─> 6 MCP Tools (read-only)                                │
+│  └─> 7 MCP Tools (read-only)                                │
 │                                                              │
 │  ┌────────────────────┐         ┌──────────────────────┐    │
 │  │  queries.py        │────────>│  PostgreSQL 14+      │    │
-│  │  (5 tools)         │         │  + pgvector          │    │
+│  │  (5 query fns)     │         │  + pgvector          │    │
 │  ├────────────────────┤         │                      │    │
 │  │  humandato_queries │         │  Database:           │    │
-│  │  (1 tool)          │         │  concept_sediment    │    │
+│  │  (alerts)          │         │  concept_sediment    │    │
+│  ├────────────────────┤         │                      │    │
+│  │  server.py         │         │                      │    │
+│  │  (cs_session_open) │         │                      │    │
 │  └────────────────────┘         └──────────────────────┘    │
 │           │                                                  │
 │           └────> OpenAI API (embeddings)                    │
@@ -147,6 +150,25 @@ Las vacunas tienen **scope project-agnostic**:
   Ejemplos: YAML (solo concept-sediment), catalogo (solo inducop)
 
 **Implicación operacional:** Una vacuna global sedimentada en proyecto "inducop" protege también a "concept-sediment". No es necesario sedimentar la misma vacuna en cada proyecto.
+
+---
+
+### 7. `cs_session_open`
+Apertura asistida de sesión via Marco Teórico Vivo (MTV). Compone múltiples `cs_search_concepts` + `cs_get_alerts` en una sola invocación.
+
+**Parámetros:**
+- `topic` (string, required): Tema de la sesión (label informativo)
+- `queries` (list[string], required, 1-5): Queries que reflejan el tema desde ángulos distintos. El caller las provee — el tool no genera ángulos
+- `domain` (string, optional): Filtra dominio en todas las queries
+- `project` (string, optional): Filtra proyecto en queries y alertas
+- `limit_per_query` (int, default=5): Resultados por query
+
+**Retorna:**
+- `concepts_ranked`: conceptos deduplicados por nombre, ordenados por mejor similaridad observada entre queries
+- `concepts_per_query`: resultados crudos por query (para distinguir qué ángulo trajo qué)
+- `alerts`: alertas inmunológicas activas
+
+**Diseño:** reduce fricción del protocolo MTV de 3-5 tool calls a 1. No toma decisiones metodológicas: solo compone tools existentes.
 
 ---
 

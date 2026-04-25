@@ -176,6 +176,7 @@ def get_fractures(project: Optional[str] = None) -> list[dict]:
             cid = row.concept_id
             if cid not in fracturas:
                 fracturas[cid] = {
+                    "concept_id": cid,
                     "concept": row.concept_name,
                     "status": row.concept_status,
                     "weight": round(row.concept_weight, 1),
@@ -313,7 +314,7 @@ WHERE cr.target_id = :concept_id
 """
 
 
-def _fractura_reparada(concept_id: int) -> bool:
+def _fractura_reparada(concept_id: int, session=None) -> bool:
     """
     Una fractura se considera reparada si existe un concepto activo
     que tiene relación refines/resolves/instance_of hacia el concepto
@@ -321,11 +322,16 @@ def _fractura_reparada(concept_id: int) -> bool:
 
     Args:
         concept_id: ID del concepto debilitado
+        session: sesión SQLAlchemy existente. Si None, abre una nueva
+            (compatibilidad). En llamadas en loop, pasar la sesión
+            del caller para evitar N+1.
 
     Returns:
         bool: True si existe eslabón genealógico reparador
     """
-    session = get_session()
+    own_session = session is None
+    if own_session:
+        session = get_session()
     try:
         result = session.execute(
             text(REPAIR_CHECK_SQL),
@@ -335,7 +341,8 @@ def _fractura_reparada(concept_id: int) -> bool:
             return False
         return result.count > 0
     finally:
-        session.close()
+        if own_session:
+            session.close()
 
 
 def _calcular_severidad(fractura_dict: dict) -> str:
@@ -398,20 +405,8 @@ def get_all_alerts(project: Optional[str] = None) -> dict:
     session = get_session()
     try:
         for fractura in fractures_raw:
-            # Obtener concept_id para verificar reparación
-            # (ya tenemos concept_name, necesitamos buscar el ID)
-            result = session.execute(
-                text("SELECT id FROM graph_concept WHERE name = :name LIMIT 1"),
-                {"name": fractura["concept"]}
-            ).fetchone()
-
-            if not result:
-                continue
-
-            concept_id = result.id
-
             # Si fractura está reparada, no reportarla
-            if _fractura_reparada(concept_id):
+            if _fractura_reparada(fractura["concept_id"], session=session):
                 continue
 
             # Clasificar por severidad

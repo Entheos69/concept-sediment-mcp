@@ -39,20 +39,6 @@ def _generate_query_embedding(query_text: str) -> list | None:
         return None
 
 
-def _format_concept_row(row) -> dict:
-    """Formatea una fila de concepto para JSON de salida."""
-    return {
-        "name": row.name,
-        "type": row.type,
-        "status": row.status,
-        "description": (row.description or "")[:300],
-        "weight": round(row.weight, 1),
-        "last_seen": row.last_seen_at.strftime("%Y-%m-%d") if row.last_seen_at else None,
-        "domains": row.domains_list if hasattr(row, "domains_list") else [],
-        "projects": row.projects or [],
-    }
-
-
 # ════════════════════════════════════════════════════════════════
 # TOOL 1: search_concepts
 # ════════════════════════════════════════════════════════════════
