@@ -30,6 +30,7 @@ Compatibilidad con claude.ai:
   claude.ai soporta Streamable HTTP con SSE fallback.
 """
 import json
+import logging
 import os
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -53,6 +54,11 @@ from audit_queries import init_audit_log_table, get_audit_log
 # ── Configuración ──
 MCP_PORT = int(os.environ.get("MCP_PORT", os.environ.get("PORT", "8000")))
 MCP_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+)
 
 
 # ── Lifespan: conexión a DB + init audit log ──
