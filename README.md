@@ -242,6 +242,23 @@ Consulta read-only del audit log de write tools (`mcp_audit_log`). Base operativ
 
 ---
 
+## 📌 Schema YAML — Relación `interpreted_under` (nueva 2026-05)
+
+`interpreted_under` es el **único caso especial fuera de `RELATION_MAP`**. Sintaxis mínima:
+
+```yaml
+related_to:
+  - target: "frame:<alias>"
+    relation: interpreted_under
+    notes: "<anotación opcional>"
+```
+
+Cuando el extractor (`extract_concepts.py` en concept-sediment) detecta este patrón, la cita NO va a `graph_conceptrelation` sino a la tabla separada `graph_frame_reference` (decisión gamma F45 / 2026-05-02). Candado bidireccional: `frame:` ↔ `interpreted_under` son simétricamente obligatorios; cualquier desalineación produce ERROR/WARNING + skip con audit log explícito.
+
+**Detalle completo** (validación de archivo en `FRAMES_DIR`, candados, ground arquitectónico, referencias): [`INTERPRETED_UNDER.md`](INTERPRETED_UNDER.md).
+
+---
+
 ## 🚀 Deployment (Railway)
 
 **Proyecto:** `balanced-determination`
