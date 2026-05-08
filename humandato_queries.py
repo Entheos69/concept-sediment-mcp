@@ -387,15 +387,21 @@ def get_all_alerts(project: Optional[str] = None) -> dict:
     """Retorna todas las alertas del sistema inmunológico con
     clasificación por severidad y auto-filtrado de fracturas reparadas.
 
+    EXTENSIÓN C2d (F47): incluye sección "relation_discards" con aristas
+    pending de RelationDiscard (tipos inválidos + targets no encontrados).
+
     Args:
         project: filtrar por proyecto (ej: "inducop")
 
     Returns:
         dict con fractures (clasificadas por severidad),
-        missing_vaccines, summary
+        missing_vaccines, relation_discards (C2d), summary
     """
+    from discard_queries import get_discards_summary
+
     fractures_raw = get_fractures(project)
     vaccines = get_missing_vaccines(project)
+    discards = get_discards_summary(project)
 
     # Clasificar fracturas por severidad y filtrar reparadas
     criticas = []
@@ -447,6 +453,7 @@ def get_all_alerts(project: Optional[str] = None) -> dict:
             "total": total_fractures,
         },
         "missing_vaccines": vaccines,
+        "relation_discards": discards,  # C2d extension
         "summary": {
             "fractures_count": total_fractures,
             "fractures_criticas": len(criticas),

@@ -4,7 +4,7 @@ Concept Sediment — MCP Server
 Servidor MCP con transporte Streamable HTTP (stateless, JSON responses)
 para exponer el grafo de conceptos a claude.ai y otros consumidores MCP.
 
-10 Tools (8 read + 1 write + 1 audit-read):
+11 Tools (9 read + 1 write + 1 audit-read):
 
 Tools de lectura (no modifican estado):
   - cs_search_concepts:      búsqueda semántica por query
@@ -12,8 +12,9 @@ Tools de lectura (no modifican estado):
   - cs_get_concept_graph:    grafo alrededor de un concepto
   - cs_get_domain_summary:   resumen narrativo de un dominio
   - cs_get_session_context:  contexto filtrado para iniciar sesión
-  - cs_get_alerts:           alertas inmunológicas (fracturas + vacunas)
+  - cs_get_alerts:           alertas inmunológicas (fracturas + vacunas + discards C2d)
   - cs_session_open:         apertura MTV (multi-query + alerts en 1 call)
+  - cs_get_discards:         lista RelationDiscard con filtros (C2e F47)
   - cs_audit_thread:         cobertura batch de un hilo de conceptos (D-T4)
   - cs_get_audit_log:        consulta read-only del audit log
 
@@ -48,6 +49,7 @@ from queries import (
     get_session_context_data,
 )
 from humandato_queries import get_all_alerts
+from discard_queries import get_discards_detail
 from write_queries import record_measurement
 from audit_queries import init_audit_log_table, get_audit_log
 
@@ -342,21 +344,25 @@ class GetAlertsInput(BaseModel):
 def cs_get_alerts(params: GetAlertsInput) -> str:
     """Alertas inmunológicas del Humandato.
 
-    Retorna dos tipos de alerta:
+    Retorna tres tipos de alerta:
     1. Fracturas: conceptos debilitados con dependientes activos
        (señal predictiva de fallo)
     2. Vacunas faltantes: directivas conocidas sin representación
        en el grafo (riesgo de violación recurrente)
+    3. Aristas pending (C2d F47): RelationDiscard con tipos inválidos
+       o targets no encontrados (discordancias schema-YAML)
 
     Invocar al inicio de cada sesión, después de cs_get_session_context.
     """
+    from discard_queries import CS_DISCARD_STALE_DAYS, CS_DISCARD_PROMO_OCCURRENCES, CS_DISCARD_PROMO_AGENTS
+
     alerts = get_all_alerts(project=params.project)
 
     # Formato narrativo para el LLM
     lines = []
     summary = alerts["summary"]
 
-    if summary["status"] == "stable":
+    if summary["status"] == "stable" and alerts["relation_discards"]["total_pending"] == 0:
         lines.append("Humandato: sistema inmunologico estable. Sin alertas.")
         return "\n".join(lines)
 
@@ -401,6 +407,39 @@ def cs_get_alerts(params: GetAlertsInput) -> str:
             lines.append(f"  [{sev}] {v['category']}: {v['directive']}")
             if v.get("failure_history"):
                 lines.append(f"    Historial: {v['failure_history']}")
+        lines.append("")
+
+    # C2d F47: Aristas pending (RelationDiscard)
+    discards = alerts["relation_discards"]
+    if discards["total_pending"] > 0:
+        lines.append("ARISTAS PENDING (RelationDiscard - F47 C2d):")
+        lines.append(f"  Total pending: {discards['total_pending']}")
+        lines.append("  Por reason:")
+        lines.append(f"    - unknown_type: {discards['by_reason']['unknown_type']}")
+        lines.append(f"    - target_not_found: {discards['by_reason']['target_not_found']}")
+
+        if discards["top_invalid_types"]:
+            lines.append("  Top 3 tipos invalidos sin alias:")
+            for i, t in enumerate(discards["top_invalid_types"], 1):
+                lines.append(
+                    f"    {i}. {t['type']} "
+                    f"({t['occurrences']} ocurrencias x {t['agents']} agentes)"
+                )
+
+        if discards["oldest_pending_days"] is not None:
+            lines.append(f"  Mas antiguo: {discards['oldest_pending_days']} dias")
+            if discards["oldest_pending_days"] > CS_DISCARD_STALE_DAYS:
+                lines.append(
+                    f"    [ALERTA] Supera umbral de {CS_DISCARD_STALE_DAYS} dias"
+                )
+
+        if discards["types_meeting_promo_rule"] > 0:
+            lines.append(
+                f"  Cumple regla B1.2 (>={CS_DISCARD_PROMO_OCCURRENCES} x "
+                f">={CS_DISCARD_PROMO_AGENTS}): "
+                f"{discards['types_meeting_promo_rule']} tipo(s)"
+            )
+
         lines.append("")
 
     return "\n".join(lines)
@@ -513,7 +552,61 @@ def cs_session_open(params: SessionOpenInput) -> str:
 
 
 # ════════════════════════════════════════════════════════════════
-# TOOL 8: cs_audit_thread
+# TOOL 8: cs_get_discards (C2e F47)
+# ════════════════════════════════════════════════════════════════
+
+class GetDiscardsInput(BaseModel):
+    """Parámetros para consulta de RelationDiscard."""
+    reason: Optional[str] = Field(
+        default=None,
+        description="Filtro por reason: 'unknown_type' | 'target_not_found'",
+    )
+    status: Optional[str] = Field(
+        default="pending",
+        description="Filtro por resolution_status (default: 'pending')",
+    )
+    project: Optional[str] = Field(
+        default=None,
+        description="Filtro por proyecto via session_id prefix",
+    )
+    limit: int = Field(default=50, ge=1, le=200)
+
+
+@mcp.tool(
+    name="cs_get_discards",
+    annotations={
+        "title": "Get Relation Discards (F47)",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+def cs_get_discards(params: GetDiscardsInput) -> str:
+    """Lista RelationDiscard con filtros (C2e F47).
+
+    Retorna aristas que el extractor no pudo procesar inmediatamente
+    debido a tipo de relación inválido o target no encontrado.
+
+    Campos diseñados para visualización (contrato F47 §7.3, decisión
+    Guardian B3.3 delta). Útil para Bibliotecario, Mirador, agentes
+    que necesiten inspeccionar discordancias estructuradamente.
+
+    Por default retorna solo 'pending' — aristas pendientes de decisión
+    Guardian. Filtrar por status='mapped_to_alias' o 'promoted_to_enum'
+    para ver aristas ya resueltas.
+    """
+    data = get_discards_detail(
+        reason=params.reason,
+        status=params.status,
+        project=params.project,
+        limit=params.limit,
+    )
+    return json.dumps(data, ensure_ascii=False, indent=2, default=str)
+
+
+# ════════════════════════════════════════════════════════════════
+# TOOL 9: cs_audit_thread
 # ════════════════════════════════════════════════════════════════
 
 class AuditThreadInput(BaseModel):
@@ -641,7 +734,7 @@ def cs_audit_thread(params: AuditThreadInput) -> str:
 # ════════════════════════════════════════════════════════════════
 
 # ════════════════════════════════════════════════════════════════
-# TOOL 9: cs_record_measurement (write)
+# TOOL 10: cs_record_measurement (write)
 # ════════════════════════════════════════════════════════════════
 
 class RecordMeasurementInput(BaseModel):
@@ -743,7 +836,7 @@ def cs_record_measurement(params: RecordMeasurementInput) -> str:
 # ════════════════════════════════════════════════════════════════
 
 # ════════════════════════════════════════════════════════════════
-# TOOL 10: cs_get_audit_log (read)
+# TOOL 11: cs_get_audit_log (read)
 # ════════════════════════════════════════════════════════════════
 
 class GetAuditLogInput(BaseModel):
