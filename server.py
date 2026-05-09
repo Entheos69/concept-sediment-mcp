@@ -362,7 +362,9 @@ def cs_get_alerts(params: GetAlertsInput) -> str:
     lines = []
     summary = alerts["summary"]
 
-    if summary["status"] == "stable" and alerts["relation_discards"]["total_pending"] == 0:
+    discards_dict = alerts["relation_discards"]
+    discards_real = discards_dict.get("total_pending_real", discards_dict["total_pending"])
+    if summary["status"] == "stable" and discards_real == 0:
         lines.append("Humandato: sistema inmunologico estable. Sin alertas.")
         return "\n".join(lines)
 
@@ -414,6 +416,12 @@ def cs_get_alerts(params: GetAlertsInput) -> str:
     if discards["total_pending"] > 0:
         lines.append("ARISTAS PENDING (RelationDiscard - F47 C2d):")
         lines.append(f"  Total pending: {discards['total_pending']}")
+        # F47-D1.1: distinguir productivas de smokes
+        total_real = discards.get("total_pending_real", discards["total_pending"])
+        if total_real != discards["total_pending"]:
+            lines.append(f"  Productivas (excluyendo smokes): {total_real}")
+            if total_real == 0:
+                lines.append("  [INFO] Todos los pending provienen de sesiones smoke. Sin alerta productiva.")
         lines.append("  Por reason:")
         lines.append(f"    - unknown_type: {discards['by_reason']['unknown_type']}")
         lines.append(f"    - target_not_found: {discards['by_reason']['target_not_found']}")

@@ -33,8 +33,10 @@ WITH discard_counts AS (
     SELECT
         reason,
         COUNT(*) as total,
+        COUNT(*) FILTER (WHERE COALESCE(sl.is_test, FALSE) = FALSE) as total_real,
         MIN(discarded_at) as oldest
-    FROM graph_relationdiscard
+    FROM graph_relationdiscard rd
+    LEFT JOIN graph_sessionlog sl ON sl.session_id = rd.session_id
     WHERE resolution_status = 'pending'
     GROUP BY reason
 ),
@@ -42,24 +44,27 @@ type_stats AS (
     SELECT
         relation_type_raw,
         COUNT(*) as occurrences,
-        COUNT(DISTINCT SUBSTRING(session_id FROM 1 FOR 18)) as sessions,
+        COUNT(DISTINCT SUBSTRING(rd.session_id FROM 1 FOR 18)) as sessions,
         -- Extract agent suffix from session_id (formato: YYYY-MM-DD-NNN-Agent)
         COUNT(DISTINCT
             CASE
-                WHEN session_id ~ '-[A-Za-z]+$'
-                THEN SUBSTRING(session_id FROM '-([A-Za-z]+)$')
+                WHEN rd.session_id ~ '-[A-Za-z]+$'
+                THEN SUBSTRING(rd.session_id FROM '-([A-Za-z]+)$')
                 ELSE 'unknown'
             END
         ) as agents
-    FROM graph_relationdiscard
+    FROM graph_relationdiscard rd
+    LEFT JOIN graph_sessionlog sl ON sl.session_id = rd.session_id
     WHERE resolution_status = 'pending'
       AND reason = 'unknown_type'
+      AND COALESCE(sl.is_test, FALSE) = FALSE
     GROUP BY relation_type_raw
     ORDER BY occurrences DESC
     LIMIT 3
 )
 SELECT
     (SELECT COALESCE(SUM(total), 0) FROM discard_counts) as total_pending,
+    (SELECT COALESCE(SUM(total_real), 0) FROM discard_counts) as total_pending_real,
     (SELECT COALESCE(SUM(total), 0) FROM discard_counts WHERE reason = 'unknown_type') as unknown_type_count,
     (SELECT COALESCE(SUM(total), 0) FROM discard_counts WHERE reason = 'target_not_found') as target_not_found_count,
     (SELECT MIN(oldest) FROM discard_counts) as oldest_pending,
@@ -92,7 +97,7 @@ def get_discards_summary(project: Optional[str] = None) -> dict:
         if project:
             sql = sql.replace(
                 "WHERE resolution_status",
-                "WHERE session_id LIKE :project_prefix AND resolution_status"
+                "WHERE rd.session_id LIKE :project_prefix AND resolution_status"
             )
             params["project_prefix"] = f"{project}-%"
 
@@ -101,6 +106,7 @@ def get_discards_summary(project: Optional[str] = None) -> dict:
         if not row or row.total_pending == 0:
             return {
                 "total_pending": 0,
+                "total_pending_real": 0,
                 "by_reason": {"unknown_type": 0, "target_not_found": 0},
                 "top_invalid_types": [],
                 "oldest_pending_days": None,
@@ -123,6 +129,7 @@ def get_discards_summary(project: Optional[str] = None) -> dict:
 
         return {
             "total_pending": row.total_pending,
+            "total_pending_real": row.total_pending_real,
             "by_reason": {
                 "unknown_type": row.unknown_type_count,
                 "target_not_found": row.target_not_found_count,
@@ -154,6 +161,7 @@ SELECT
     rd.discarded_at,
     rd.resolved_at,
     rd.resolved_by,
+    COALESCE(sl.is_test, FALSE) as is_test,
     -- Determinar si target es reconciliable vía slug
     CASE
         WHEN rd.reason = 'target_not_found' THEN
@@ -169,6 +177,7 @@ SELECT
     END as target_match_type
 FROM graph_relationdiscard rd
 LEFT JOIN graph_concept c ON c.id = rd.source_concept_id
+LEFT JOIN graph_sessionlog sl ON sl.session_id = rd.session_id
 WHERE 1=1
 """
 
@@ -229,6 +238,7 @@ def get_discards_detail(
                 "discarded_at": row.discarded_at.isoformat() if row.discarded_at else None,
                 "target_match_type": row.target_match_type,
                 "alias_proposal": None,  # TODO: fuzzy match si reason=unknown_type
+                "is_test": row.is_test,
             }
 
             # TODO: Implementar fuzzy match para alias_proposal
@@ -254,6 +264,7 @@ def get_discards_detail(
             "discards": discards,
             "summary": {
                 "total": len(discards),
+                "total_real": sum(1 for d in discards if not d["is_test"]),
                 "by_reason": by_reason,
                 "by_status": by_status,
                 "oldest_pending_days": oldest_days,
