@@ -200,6 +200,7 @@ Code tiene incompletitud inherente en auto-conocimiento del sistema. Usar lengua
 - **process_session.sh — modos de ejecución:** [references/process-session-modes.md](references/process-session-modes.md)
 - **Protocolo de cierre YAML (8 pasos + WAL):** [references/cierre-sesion.md](references/cierre-sesion.md)
 - **Failure modes históricos:** [references/failure-modes.md](references/failure-modes.md)
+- **Playbooks operativos (smoke tests + intervenciones BD, ciclo Mirador):** [references/playbooks-bd-y-smokes.md](references/playbooks-bd-y-smokes.md)
 
 ## Actualización del Skill
 
