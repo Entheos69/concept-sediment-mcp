@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="es" data-doc="reporte-pipeline-consumo-yaml" data-version="1.0" data-estado="vigente" data-productor="CodeMCP" data-fecha="2026-06-10">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concept-Sediment · Pipeline de Consumo de YAMLs · Reporte HTML-DC</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#0a1730;--navy2:#0f2143;--ink:#e8eef7;
+    --cyan:#27c4e0;--lime:#9fe870;--amber:#ffbf4d;--rose:#ff7a8a;
+    --muted:#7d92b3;--line:rgba(120,150,190,.18);
+    --serif:'Fraunces',Georgia,serif;--sans:'IBM Plex Sans',system-ui,sans-serif;--mono:'IBM Plex Mono',monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:
+      radial-gradient(900px 500px at 85% -5%,rgba(39,196,224,.10),transparent 60%),
+      radial-gradient(700px 420px at -5% 30%,rgba(159,232,112,.06),transparent 55%),
+      var(--navy);
+    color:var(--ink);font-family:var(--sans);font-weight:300;line-height:1.65;-webkit-font-smoothing:antialiased;padding:0 0 80px}
+  .wrap{max-width:960px;margin:0 auto;padding:0 28px}
+  header.top{padding:64px 0 28px;border-bottom:1px solid var(--line)}
+  .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:var(--cyan)}
+  h1{font-family:var(--serif);font-weight:900;font-size:clamp(32px,6vw,52px);line-height:1.05;letter-spacing:-.02em;margin:14px 0 10px}
+  h1 em{font-style:italic;font-weight:400;color:var(--cyan)}
+  .sub{color:var(--muted);font-size:16px;max-width:66ch}
+  .part{margin-top:58px;padding-top:28px;border-top:2px solid rgba(39,196,224,.3)}
+  .part-id{font-family:var(--mono);font-size:12px;color:var(--lime);letter-spacing:.2em}
+  h2{font-family:var(--serif);font-weight:600;font-size:clamp(24px,4vw,34px);letter-spacing:-.01em;margin:6px 0 10px}
+  h3{font-family:var(--serif);font-weight:600;font-size:20px;margin:26px 0 8px;color:var(--ink)}
+  p.body{font-size:15.5px;color:#d4e0f2;max-width:70ch;margin-bottom:12px}
+  .lead{color:var(--muted);font-size:15.5px;max-width:66ch;margin-bottom:8px}
+  strong{color:var(--ink);font-weight:500}
+  code{font-family:var(--mono);font-size:.88em;background:rgba(39,196,224,.1);padding:1px 6px;border-radius:5px;color:var(--cyan)}
+
+  table{width:100%;border-collapse:collapse;margin:18px 0;font-size:13.5px}
+  th{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--cyan);text-align:left;padding:10px 12px;border-bottom:1px solid var(--line)}
+  td{padding:11px 12px;border-bottom:1px solid var(--line);color:#d4e0f2;vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td.num{font-family:var(--mono);text-align:right;color:var(--ink)}
+  td.mono{font-family:var(--mono);font-size:12px}
+  .win{color:var(--lime);font-weight:500}.cond{color:var(--amber);font-weight:500}.lose{color:var(--rose);font-weight:500}
+
+  .callout{margin:22px 0;padding:18px 22px;border-radius:12px;background:rgba(159,232,112,.07);border:1px solid rgba(159,232,112,.3)}
+  .callout.warn{background:rgba(255,191,77,.07);border-color:rgba(255,191,77,.35)}
+  .callout.risk{background:rgba(255,122,138,.07);border-color:rgba(255,122,138,.35)}
+  .callout .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--lime)}
+  .callout.warn .lbl{color:var(--amber)}
+  .callout.risk .lbl{color:var(--rose)}
+  .callout p{font-size:14.5px;color:#d4e0f2;margin-top:5px}
+
+  .rule-card{margin:14px 0;border:1px solid var(--line);border-radius:12px;background:rgba(255,255,255,.015);overflow:hidden}
+  .rule-card .rc-head{display:flex;gap:12px;align-items:baseline;padding:14px 20px;background:rgba(15,33,67,.5);border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .rc-num{font-family:var(--mono);font-size:12px;color:var(--cyan);border:1px solid rgba(39,196,224,.4);border-radius:7px;padding:2px 8px;white-space:nowrap}
+  .rc-title{font-family:var(--serif);font-size:17px;font-weight:600}
+  .rule-card .rc-body{padding:14px 20px;font-size:14.5px;color:#d4e0f2}
+  .rc-body .why{margin-top:8px;padding-left:16px;border-left:2px solid rgba(159,232,112,.35);font-size:13.5px;color:#c3d2ea}
+  .rc-body .why b{color:var(--lime);font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;display:block;margin-bottom:2px}
+  .rc-body .why.tau{border-left-color:rgba(39,196,224,.45)}
+  .rc-body .why.tau b{color:var(--cyan)}
+
+  .tag{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;border-radius:6px;padding:2px 8px;margin-left:6px;vertical-align:middle}
+  .tag.sed{color:var(--cyan);border:1px solid rgba(39,196,224,.4)}
+  .tag.new{color:var(--lime);border:1px solid rgba(159,232,112,.4)}
+  .tag.debt{color:var(--amber);border:1px solid rgba(255,191,77,.4)}
+  .tag.frac{color:var(--rose);border:1px solid rgba(255,122,138,.4)}
+
+  pre.snippet{background:#06101f;border:1px solid var(--line);border-radius:10px;padding:16px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.6;color:#9fb6d6;margin:14px 0}
+  pre.snippet .ok{color:var(--lime)}
+  pre.snippet .bad{color:var(--rose)}
+  pre.snippet .dim{color:#5d7494}
+  .machine{margin-top:58px;border:1px dashed var(--line);border-radius:12px;background:#06101f}
+  .machine summary{cursor:pointer;font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--cyan);padding:15px 20px;user-select:none}
+  .machine pre{margin:0;padding:0 20px 20px;overflow-x:auto;font-family:var(--mono);font-size:12px;line-height:1.6;color:#9fb6d6}
+  footer{margin-top:40px;color:var(--muted);font-size:12.5px;font-family:var(--mono);text-align:center}
+  ::selection{background:rgba(39,196,224,.3)}
+  dl.gloss{margin:18px 0}
+  dl.gloss dt{font-family:var(--mono);font-size:13px;color:var(--cyan);margin-top:14px}
+  dl.gloss dd{font-size:14.5px;color:#d4e0f2;margin-left:0;max-width:72ch}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div class="kicker">Concept-Sediment · CodeMCP · Reporte Técnico · 2026-06-10</div>
+  <h1>Pipeline de consumo de YAMLs:<br>anatomía de la <em>sedimentación</em></h1>
+  <p class="sub">Mapa función-por-función desde <code>process_session.sh</code> hasta las tools <code>cs_*</code> del MCP server. Con glosario, justificación de cada decisión de diseño, ejemplos, contraejemplos, <strong>contraste tautológico contra el propio grafo</strong>, y proyecciones del sistema.</p>
+</header>
+
+<!-- ===================== §1 JUSTIFICACIÓN ===================== -->
+<section class="part" data-part="justificacion">
+  <div class="part-id">§1 · JUSTIFICACIÓN — POR QUÉ EL PIPELINE ES ASÍ</div>
+  <h2>Tres decisiones cargan todo el peso</h2>
+
+  <div class="rule-card" data-decision="D1">
+    <div class="rc-head"><span class="rc-num">D1</span><span class="rc-title">La base de datos compartida ES el contrato de integración</span></div>
+    <div class="rc-body">No existe API de ingesta ni "envío al MCP server". El pipeline Django (local) y el MCP server (Railway) leen y escriben el <strong>mismo Postgres+pgvector</strong>. Al hacer COMMIT la transacción de extract, cualquier <code>cs_search_concepts</code> ya ve los datos.
+      <div class="why"><b>Fundamento</b>Elimina una capa entera de serialización, versionado de API y sincronización. El precio: el schema de las tablas <code>graph_*</code> se vuelve contrato público — toda migración es un cambio de interfaz entre dos repos (de ahí el gate G3 de CLAUDE.md).</div>
+    </div>
+  </div>
+
+  <div class="rule-card" data-decision="D2">
+    <div class="rc-head"><span class="rc-num">D2</span><span class="rc-title">Orquestador shell delgado + comandos Django idempotentes</span></div>
+    <div class="rc-body"><code>process_session.sh</code> no contiene lógica de negocio: hace pre-flight, watchdogs y secuenciación. Cada fase (extract, decay, fracturas, embeddings, índices) es un <code>manage.py</code> invocable por separado.
+      <div class="why"><b>Fundamento</b>Esa separación es lo que habilita los modos <code>--fast</code> / <code>--maintenance</code> / <code>--skip-decay</code> y la reparación manual paso a paso cuando algo truena. Un monolito no permitiría procesar 3 YAMLs con un solo mantenimiento final.</div>
+    </div>
+  </div>
+
+  <div class="rule-card" data-decision="D3">
+    <div class="rc-head"><span class="rc-num">D3</span><span class="rc-title">Nunca descartar en silencio <span class="tag sed">ya sedimentado</span></span></div>
+    <div class="rc-body">Toda discordancia (relación con tipo desconocido, target inexistente, validación fallida) se captura en <code>RelationDiscard</code> con razón estructurada y ruta de reconciliación.
+      <div class="why tau"><b>Grano de tautología</b>Esto no es un hallazgo de este mapeo: es el <strong>"Axioma de no-descarte de discordancias schema-YAML"</strong> (principle activo, decisión B1.1 alfa del Guardian, 2026-05-05) ya sedimentado en el grafo. El código de <code>extract_concepts.py</code> es su implementación literal.</div>
+    </div>
+  </div>
+
+  <div class="callout">
+    <span class="lbl">La forma del sistema</span>
+    <p>El pipeline es un <strong>compilador de memoria</strong>: el YAML es código fuente, el pre-flight es el linter, extract es el parser+linker (resuelve referencias), decay/promoción son el optimizador (recalcula pesos con el tiempo), y los embeddings son el índice del binario. El MCP server es el runtime que lo ejecuta como consultas.</p>
+  </div>
+</section>
+
+<!-- ===================== §2 GLOSARIO ===================== -->
+<section class="part" data-part="glosario">
+  <div class="part-id">§2 · GLOSARIO</div>
+  <h2>Vocabulario del sistema</h2>
+  <dl class="gloss">
+    <dt>sedimentación</dt><dd>Proceso de convertir el conocimiento de una sesión de trabajo (YAML de cierre) en nodos y aristas persistentes del grafo. Metáfora geológica: las capas se acumulan y consolidan con el tiempo.</dd>
+    <dt>concepto (Concept)</dt><dd>Nodo del grafo. Tiene <code>name</code> único (≤200 chars), <code>type</code> evolutivo, <code>status</code>, <code>weight</code>, <code>description</code>, dominios, proyectos y un vector <code>embedding</code> de 1536 dimensiones.</dd>
+    <dt>depth</dt><dd>Cómo se usó el concepto en la sesión — NO qué es. Valores: <code>mention</code> (referenciado), <code>usage</code> (aplicado), <code>decision</code> (informó una decisión). Cada uno aporta un delta de weight distinto.</dd>
+    <dt>type (event / pattern / principle)</dt><dd>Madurez del concepto. NO se declara en el YAML: el sistema lo infiere y lo promueve automáticamente según frecuencia, profundidad y span temporal.</dd>
+    <dt>weight</dt><dd>Score acumulado del concepto. Sube con cada ocurrencia productiva (ponderada por depth). Conceptos con weight ≥ 2.0 son principios consolidados: no contradecirlos sin consultar al Guardian.</dd>
+    <dt>occurrence (ConceptOccurrence)</dt><dd>Registro de que un concepto apareció en una sesión concreta, con su depth, proyecto, contexto y metadata YAML cruda. Es la unidad de evidencia.</dd>
+    <dt>decay</dt><dd>Envejecimiento temporal: conceptos sin menciones recientes transitan active → dormant → archived, modulado por densidad del dominio y amortiguador por weight. Los principle no decaen.</dd>
+    <dt>promoción</dt><dd>Ascenso de type: event→pattern (3+ ocurrencias, 1+ usage, span ≥7 días); pattern→principle (8+ ocurrencias, 2+ decisions, span ≥30 días). Solo cuentan ocurrencias productivas.</dd>
+    <dt>fractura</dt><dd>Alerta inmunológica: un concepto debilitado por decay (dormant/archived) que aún tiene dependientes activos. Señala cimientos que se duermen bajo estructuras vivas.</dd>
+    <dt>vacuna</dt><dd>Concepto sedimentado que codifica una directiva contra un failure mode conocido. <code>cs_get_alerts</code> reporta las vacunas esperadas que faltan en el grafo.</dd>
+    <dt>RelationDiscard</dt><dd>Captura estructurada de una relación que no pudo sedimentar (tipo desconocido o target no encontrado). Queda <code>pending</code> hasta reconciliación caso por caso.</dd>
+    <dt>RelationAlias</dt><dd>Tabla de reconciliación de grafía: mapea un alias de relación (ej. <code>resolved_by</code>) a su tipo canónico, con posible inversión de dirección (flip).</dd>
+    <dt>smoke / is_test</dt><dd>Sesión de prueba E2E. Declara <code>status: smoke_test</code> en el YAML; sedimenta con <code>SessionLog.is_test=True</code>: persiste para forensia pero queda excluida de weight, promoción, decay y queries productivas (axioma F47-D1).</dd>
+    <dt>FULL / LIGHT</dt><dd>Decisión automática del script por día calendario: la primera corrida del día es FULL (pipeline completo); las siguientes son LIGHT (sin decay ni fracturas, que solo tienen sentido una vez al día).</dd>
+    <dt>cuarentena selectiva</dt><dd>Política del pre-flight batch: los archivos que fallan checks NO procesan, los que pasan SÍ, con reporte explícito de razones y advertencia sobre relaciones cruzadas hacia archivos en cuarentena.</dd>
+    <dt>SessionLog</dt><dd>Registro de procesamiento por <code>session_id</code>. Es la pieza que da idempotencia al pipeline y la que porta el flag <code>is_test</code>.</dd>
+    <dt>Humandato</dt><dd>Subsistema de alertas (fracturas + vacunas faltantes). Su salida en archivo es <code>ALERTAS_HUMANDATO.md</code>; su salida viva es <code>cs_get_alerts</code>.</dd>
+  </dl>
+</section>
+
+<!-- ===================== §3 ARQUITECTURA ===================== -->
+<section class="part" data-part="arquitectura">
+  <div class="part-id">§3 · ARQUITECTURA — ESCRITURA Y LECTURA DESACOPLADAS</div>
+  <h2>Dos procesos, una sola verdad</h2>
+
+  <pre class="snippet">
+┌─────────────────────────────┐         ┌──────────────────────────────┐
+│  ESCRITURA (local, Django)  │         │  LECTURA (Railway, FastMCP)  │
+│  concept-sediment/          │         │  concept-sediment-mcp/       │
+│                             │         │                              │
+│  process_session.sh         │         │  server.py (11 tools cs_*)   │
+│   └─ manage.py commands     │         │   └─ queries.py (SQL raw)    │
+└──────────────┬──────────────┘         └──────────────┬───────────────┘
+               │ psycopg2 directo                      │ SQLAlchemy
+               │ via proxy público                     │ red interna Railway
+               │ tramway.proxy.rlwy.net                │
+               ▼                                       ▼
+        ┌──────────────────────────────────────────────────┐
+        │   PostgreSQL + pgvector (Railway)                │
+        │   graph_concept (columna embedding vector(1536)) │
+        │   graph_conceptoccurrence · graph_conceptrelation│
+        │   graph_sessionlog · graph_domain · discards ... │
+        └──────────────────────────────────────────────────┘</pre>
+
+  <p class="body">El proceso "local" no es local en datos: <code>config/settings.py:48-55</code> detecta <code>DATABASE_URL</code> y conecta <strong>directo al Postgres remoto</strong> con <code>dj_database_url</code>, keepalives TCP y <code>connect_timeout=10</code> (Capa 4 — sin esto psycopg2 espera indefinidamente cuando Railway corta TCP sin FIN). Por eso el pre-flight verifica DNS del proxy antes de tocar nada.</p>
+
+  <table>
+    <thead><tr><th>Plano</th><th>Repo</th><th>Tecnología</th><th>Rol sobre la BD</th></tr></thead>
+    <tbody>
+      <tr><td>Ingesta + mantenimiento</td><td class="mono">concept-sediment/</td><td>Django ORM + SQL raw para vector</td><td class="win">escribe</td></tr>
+      <tr><td>Servicio semántico</td><td class="mono">concept-sediment-mcp/</td><td>FastMCP + Starlette + SQLAlchemy</td><td class="cond">lee (y escribe solo mcp_* / mediciones)</td></tr>
+      <tr><td>Embeddings</td><td>ambos</td><td>OpenAI <code>text-embedding-3-small</code></td><td>escritor: backfill · lector: embedding del query</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <span class="lbl">Consecuencia operativa</span>
+    <p>Un concepto nuevo es visible en <code>cs_get_active_concepts</code> apenas COMMIT del extract, pero <strong>invisible para búsqueda semántica</strong> hasta que corre el backfill de embeddings (el SQL del MCP filtra <code>WHERE embedding IS NOT NULL</code>). Ventana de latencia: del extract al paso 2.7, o hasta el <code>generate_embeddings</code> manual tras un batch <code>--fast</code>.</p>
+  </div>
+</section>
+
+<!-- ===================== §4 FASES ===================== -->
+<section class="part" data-part="fases">
+  <div class="part-id">§4 · LAS FASES, FUNCIÓN POR FUNCIÓN</div>
+  <h2>Del YAML al grafo consultable</h2>
+
+  <h3>Fase 0 — Pre-flight (cascada de 7 checks, cuarentena selectiva)</h3>
+  <p class="body"><code>scripts/process_session.sh:266-493</code>. Checks ordenados de barato a caro: filesystem → parsing local → red → BD. Cada paso productivo corre bajo <code>run_with_timeout()</code> (watchdog Capa 1, ajustable vía env: <code>TIMEOUT_EXTRACT=300</code>, <code>TIMEOUT_DECAY=1200</code>...).</p>
+  <table>
+    <thead><tr><th>Check</th><th>Valida</th><th>Mecanismo</th><th>Costo</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">1/7</td><td>Archivo existe</td><td class="mono">[ -f "$f" ]</td><td>cero</td></tr>
+      <tr><td class="mono">2/7</td><td><code>status: reviewed</code> (acepta <code>smoke_test</code>)</td><td class="mono">extract_yaml_field() — grep/sed local</td><td>cero</td></tr>
+      <tr><td class="mono">3/7</td><td>Lint offline: schema, longitudes, depth</td><td class="mono">manage.py lint_sessions --quiet</td><td>CPU local</td></tr>
+      <tr><td class="mono">4/7</td><td>¿Primera corrida del día? → FULL vs LIGHT</td><td class="mono">.last_run_date</td><td>cero</td></tr>
+      <tr><td class="mono">5/7</td><td>DNS resuelve el proxy Railway</td><td class="mono">nslookup ×3, backoff 1/2/4s</td><td>red</td></tr>
+      <tr><td class="mono">6/7</td><td>Provider de embeddings vivo (solo FULL)</td><td class="mono">manage.py check_embedding_provider</td><td>API</td></tr>
+      <tr><td class="mono">7/7</td><td>Idempotencia: sesión no procesada</td><td class="mono">manage.py is_processed --session-id</td><td>BD</td></tr>
+    </tbody>
+  </table>
+  <p class="body"><code>is_processed</code> comunica por <strong>exit code de 3 estados</strong>: <span class="win">0 = no procesado (procede)</span> · <span class="cond">1 = ya procesado (cuarentena)</span> · <span class="lose">2 = error de BD (aborta TODO: "falta de información no es permiso para proceder")</span>. El estado 2 captura <code>DatabaseError</code> completo — la versión anterior solo atrapaba <code>OperationalError</code> y un <code>ProgrammingError</code> escapaba como exit 1, falso "ya procesado" (hallazgo lateral F47-D1, 2026-05-09).</p>
+
+  <h3>Fase 1 — Extract (<code>extract_concepts.py</code>, todo en <code>@transaction.atomic</code>)</h3>
+  <table>
+    <thead><tr><th>Paso</th><th>Función</th><th>Qué hace</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">parse</td><td class="mono">_parse_yaml()</td><td>Exige clave raíz <code>concept_sediment:</code>; sin ella, falla.</td></tr>
+      <tr><td class="mono">validate</td><td class="mono">_validate_schema()</td><td>Campos requeridos; depth ∈ {mention,usage,decision}; longitud de name/target leída del modelo (<code>Concept._meta.get_field("name").max_length</code> — no hardcodeada, no gemelo desincronizado).</td></tr>
+      <tr><td class="mono">identidad</td><td class="mono">_process_concept()</td><td>Resolución: <code>name__iexact</code> → fallback por slug → crear nuevo (UUID en Python). La descripción se compone con <code>_compose_description()</code>: notes canónico, o campos-bitácora si no hay notes (deriva S116+).</td></tr>
+      <tr><td class="mono">evidencia</td><td class="mono">Concept.add_occurrence()</td><td><code>models.py:310</code> — crea occurrence y actualiza agregados: <code>weight += depth_weight</code>, <code>last_seen_at</code>, proyectos. Si <code>is_test=True</code>: persiste la occurrence pero NO toca agregados.</td></tr>
+      <tr><td class="mono">aristas</td><td class="mono">_process_session() fase 2</td><td>Cascada de resolución: target (concept_map → name → slug) × tipo (<code>RELATION_MAP</code> → <code>RelationAlias</code> con flip). Caso especial <code>interpreted_under</code> → <code>FrameReference</code> con candados <code>frame:</code> bidireccionales. Lo irresoluble → <code>RelationDiscard</code> auditado.</td></tr>
+      <tr><td class="mono">madurez</td><td class="mono">Concept.evaluate_promotion()</td><td>event→pattern→principle según umbrales de settings, contando solo <code>_productive_occurrences()</code>.</td></tr>
+      <tr><td class="mono">sello</td><td class="mono">SessionLog.update_or_create()</td><td><code>status=PROCESSED</code> + <code>raw_yaml</code> completo + <code>is_test</code>. Esto cierra el ciclo de idempotencia con el check 7/7.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Fases 2–2.5 — Mantenimiento (solo FULL, o vía <code>--maintenance</code>)</h3>
+  <p class="body"><code>recalculate_decay</code>: recorre los no-principle (incluye archived: la métrica puede <em>recuperarlos</em>), recalcula status por días desde última mención + densidad del dominio + amortiguador por weight. Imprime atribución estructurada del WHY por default — visibilidad que es en sí una vacuna sedimentada <span class="tag sed">ya sedimentado</span> ("Visibilidad estructural del decay", 2026-05-10). Después <code>detect_fractures</code> → <code>ALERTAS_HUMANDATO.md</code>. Orden obligatorio: decay antes de fracturas (se calculan sobre weights ya decaídos).</p>
+
+  <h3>Fase 2.7 — Embeddings (corre SIEMPRE: FULL y LIGHT)</h3>
+  <pre class="snippet">generate_embeddings --status active
+  └─ SELECT id FROM graph_concept WHERE embedding IS NULL AND status='active'
+  └─ backfill_embeddings(queryset, batch_size=10)        <span class="dim"># graph/embeddings.py:171</span>
+       └─ update_concept_embedding(concept)               <span class="dim"># por concepto</span>
+            ├─ texto = f"{concept.name}. {concept.description}"
+            ├─ generate_embedding(texto)                  <span class="dim"># OpenAI text-embedding-3-small → 1536 dims</span>
+            └─ UPDATE graph_concept SET embedding='[...]'::vector WHERE id=...</pre>
+  <p class="body">El extract deja <code>embedding = NULL</code>; este paso es un <strong>backfill desacoplado</strong>. SQL raw porque el ORM no soporta el tipo <code>vector</code>. Tu comando manual <code>generate_embeddings --status active</code> ejecuta exactamente este código — es el complemento necesario tras un batch <code>--fast</code> + <code>--maintenance</code> (que NO genera embeddings, el propio script lo advierte).</p>
+
+  <h3>Lado lectura — el MCP sirve lo sedimentado</h3>
+  <p class="body"><code>db.py</code>: engine SQLAlchemy singleton (<code>pool_pre_ping</code>, <code>pool_recycle=600</code>), sesiones stateless. <code>queries.py:46</code> — <code>search_concepts_by_embedding()</code> genera embedding del <em>query</em> con el mismo modelo OpenAI y ejecuta <code>1 - (c.embedding &lt;=&gt; CAST(:vec AS vector))</code> (distancia coseno pgvector), umbral ≥ 0.3, excluye <code>archived</code>; fallback ILIKE sin API key. <code>server.py</code>: FastMCP + Starlette + uvicorn, 11 tools <code>@mcp.tool</code> expuestas en <code>/mcp</code>.</p>
+
+  <h3>Los modos en una tabla</h3>
+  <table>
+    <thead><tr><th>Modo</th><th>Extract</th><th>Decay</th><th>Fracturas</th><th>Embeddings</th><th>Índices</th></tr></thead>
+    <tbody>
+      <tr><td class="mono">default (FULL)</td><td class="win">sí</td><td class="win">sí</td><td class="win">sí</td><td class="win">sí</td><td class="win">sí</td></tr>
+      <tr><td class="mono">default (LIGHT, 2ª del día)</td><td class="win">sí</td><td class="lose">no</td><td class="lose">no</td><td class="win">sí</td><td class="win">sí</td></tr>
+      <tr><td class="mono">--fast</td><td class="win">sí</td><td class="lose">no</td><td class="lose">no</td><td class="lose">no</td><td class="lose">no</td></tr>
+      <tr><td class="mono">--maintenance</td><td class="lose">no</td><td class="win">sí</td><td class="win">sí</td><td class="lose">no (avisa)</td><td class="win">sí</td></tr>
+      <tr><td class="mono">--skip-decay</td><td class="win">sí</td><td class="lose">no</td><td class="cond">según FULL/LIGHT</td><td class="win">sí</td><td class="win">sí</td></tr>
+    </tbody>
+  </table>
+  <p class="body">Patrón batch correcto: N × <code>--fast</code> → 1 × <code>--maintenance</code> → 1 × <code>generate_embeddings --status active</code>. El checkpoint <code>.last_maintenance</code> solo lo actualizan los modos que ejecutan decay.</p>
+</section>
+
+<!-- ===================== §5 EJEMPLOS Y CONTRAEJEMPLOS ===================== -->
+<section class="part" data-part="ejemplos">
+  <div class="part-id">§5 · EJEMPLOS Y CONTRAEJEMPLOS</div>
+  <h2>Lo que sedimenta y lo que no</h2>
+
+  <h3>Ejemplo 1 — YAML que procesa limpio</h3>
+  <pre class="snippet"><span class="ok">concept_sediment:</span>
+  session_id: "2026-06-10-001-CodeMCP"
+  project: "concept-sediment-mcp"
+  domains_active: [mcp_architecture]
+  concepts:
+    - name: "BD compartida como contrato de integracion"
+      depth: decision
+      domains: [mcp_architecture]
+      related_to:
+        - target: "sedimentacion de conceptos"
+          relation: instance_of
+      notes: "El schema graph_* es la interfaz publica entre repos."
+  status: reviewed</pre>
+  <p class="body">Pasa los 7 checks → extract crea/refuerza el nodo, la relación resuelve por nombre, <code>SessionLog</code> sella, y el siguiente <code>generate_embeddings</code> lo hace buscable semánticamente.</p>
+
+  <h3>Contraejemplo 1 — cuarentena en pre-flight (ni toca la BD)</h3>
+  <pre class="snippet"><span class="bad">status: draft</span>           <span class="dim"># CHECK 2/7 FAIL: se requiere reviewed</span>
+<span class="bad">depth: applied</span>          <span class="dim"># CHECK 3/7 FAIL (lint): depth invalido, validos mention|usage|decision</span>
+<span class="bad">name: "(212 caracteres...)"</span> <span class="dim"># CHECK 3/7 FAIL: name es identificador, no descripcion → mover a notes</span>
+<span class="bad">concept_sediment_mcp:</span>   <span class="dim"># parse FAIL: clave raiz debe ser concept_sediment</span></pre>
+  <p class="body">La cuarentena es selectiva: en un batch, los demás archivos sí procesan, con advertencia explícita de que las relaciones hacia conceptos de archivos en cuarentena quedarán como targets fantasma.</p>
+
+  <h3>Contraejemplo 2 — la relación que NO muere en silencio</h3>
+  <pre class="snippet">related_to:
+  - target: "concepto que nadie escribio"
+    relation: <span class="bad">structurally_analogous</span>   <span class="dim"># no esta en RELATION_MAP ni en RelationAlias</span>
+
+<span class="dim"># resultado:</span>
+[audit] discard_capture: unknown_type -- structurally_analogous -> concepto que nadie escribio
+<span class="ok">→ RelationDiscard(reason=UNKNOWN_TYPE, status=pending)</span>  <span class="dim"># reconciliable, auditable</span></pre>
+  <p class="body">Evidencia viva: hoy el sistema tiene <strong>25 discards pendientes</strong> (12 unknown_type + 13 target_not_found, el más antiguo de 29 días) — exactamente el caso de uso del ciclo de reconciliación caso-por-caso ya definido en el grafo <span class="tag sed">ya sedimentado</span>.</p>
+
+  <h3>Contraejemplo 3 — el smoke que persiste pero no contamina</h3>
+  <pre class="snippet">status: <span class="ok">smoke_test</span>     <span class="dim"># CHECK 2/7: [OK SMOKE] — no contamina queries productivas (F47-D1.1)</span>
+
+<span class="dim"># add_occurrence con is_test=True:</span>
+occurrence creada           <span class="ok">→ persiste (forensia)</span>
+weight / last_seen / projects <span class="bad">→ NO se actualizan</span>
+promocion / decay           <span class="bad">→ NO cuenta (solo _productive_occurrences)</span>
+queries cs_* del MCP        <span class="bad">→ excluido (COALESCE(sl.is_test, FALSE))</span></pre>
+
+  <h3>Contraejemplo 4 — el falso "ya procesado" (failure mode corregido)</h3>
+  <p class="body">Antes del fix F47-D1: una migración no aplicada producía <code>ProgrammingError</code> en <code>is_processed</code>; el except solo atrapaba <code>OperationalError</code>, Python salía con exit 1, y el script lo leía como "YA PROCESADO" — el YAML quedaba en cuarentena <em>sin haber sedimentado nunca</em>. La lección portable: <strong>en protocolos de exit code, el estado de error debe ser distinto del estado negativo</strong>, y el handler debe capturar la clase padre de excepciones.</p>
+</section>
+
+<!-- ===================== §6 GRANOS DE TAUTOLOGÍA ===================== -->
+<section class="part" data-part="tautologia">
+  <div class="part-id">§6 · GRANOS DE TAUTOLOGÍA — CONTRASTE CONTRA EL PROPIO GRAFO</div>
+  <h2>Lo que este mapeo "descubrió" y el grafo ya sabía</h2>
+  <p class="lead">Verificación reflexiva (cs_session_open, 5 queries, 2026-06-10): cada hallazgo central del mapeo se contrastó contra el grafo que el propio pipeline produce. Resultado: la mayoría de los principios de diseño ya están sedimentados — este reporte los <em>organiza</em>, no los descubre. Eso es señal de salud del sistema: la memoria funciona.</p>
+
+  <table>
+    <thead><tr><th>Hallazgo del mapeo</th><th>Estado en el grafo</th><th>Veredicto</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>No-descarte silencioso (<code>RelationDiscard</code>)</td>
+        <td class="mono">"Axioma de no-descarte de discordancias schema-YAML" · principle activo · B1.1 alfa · 2026-05-05</td>
+        <td class="win">tautología — el código implementa el axioma</td>
+      </tr>
+      <tr>
+        <td>Smoke con <code>is_test</code> ortogonal al lifecycle</td>
+        <td class="mono">"Extension de SessionStatus con smoke_test + is_test ortogonal" · axioma F47-D1 · 2026-05-09</td>
+        <td class="win">tautología — axioma de gobernanza ya autorizado</td>
+      </tr>
+      <tr>
+        <td>Filtrado <code>is_test</code> en queries del MCP</td>
+        <td class="mono">"Filtrado is_test en queries productivas del MCP" · F47-D1.1 · 2026-05-09</td>
+        <td class="win">tautología — implementación ya sedimentada (9 edits documentados)</td>
+      </tr>
+      <tr>
+        <td>"Mejora futura": entity resolution por embedding (≥0.92 mismo concepto)</td>
+        <td class="mono">"entity resolution hibrido" · w=2.0 · <strong>archived</strong> · last_seen 2026-03-19 · EN FRACTURA CRÍTICA con dependiente activo "sedimentacion de conceptos" (w=2.7)</td>
+        <td class="lose">tautología con deuda — analizado en marzo, hoy archivado; el TODO del código es su rastro</td>
+      </tr>
+      <tr>
+        <td>"Mejora futura": decay consciente de dependencias</td>
+        <td class="mono">"Refuerzo transitivo de actividad por aristas de genealogia" · activo · 2026-06-06 · dirección decidida, mecanismo diferido</td>
+        <td class="cond">tautología parcial — proyección ya decidida, pendiente de mecanismo</td>
+      </tr>
+      <tr>
+        <td>Atribución verbosa del decay como feature</td>
+        <td class="mono">"Visibilidad estructural del decay como vacuna" · 2026-05-10</td>
+        <td class="win">tautología — vacuna ya sedimentada</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <span class="lbl">Tautología inversa — el grafo va detrás del código</span>
+    <p>El grafo aún registra la deuda <strong>F47-D1.2</strong> ("process_session.sh CHECK 2/6 sigue rechazando smoke_test", detectada 2026-05-09) como brecha. Pero el código leído hoy (<code>process_session.sh:303-305</code>) <strong>ya acepta</strong> <code>status=smoke_test</code> con la rama <code>[OK SMOKE]</code>. La deuda fue pagada y nadie sedimentó el pago. Es el caso espejo de la tautología: aquí el reporte corrige al grafo, no al revés. Acción sugerida: sedimentar la resolución de F47-D1.2 en el próximo YAML de cierre.</p>
+  </div>
+
+  <div class="callout">
+    <span class="lbl">Lectura epistémica</span>
+    <p>El patrón de los seis contrastes: <strong>el código y el grafo convergen con retardo en ambas direcciones</strong>. El grafo precede al código (axiomas que luego se implementan) y el código precede al grafo (fixes que tardan en sedimentarse). El pipeline mapeado en este reporte es precisamente el mecanismo que reduce ese retardo — y este reporte es una iteración de ese mecanismo aplicado sobre sí mismo.</p>
+  </div>
+</section>
+
+<!-- ===================== §7 MEJORAS Y PROYECCIONES ===================== -->
+<section class="part" data-part="proyecciones">
+  <div class="part-id">§7 · MEJORAS Y PROYECCIONES</div>
+  <h2>Hacia dónde puede crecer</h2>
+  <p class="lead">Cada propuesta marcada según el contraste de §6: <span class="tag sed">ya en el grafo</span> = retomarla, no re-descubrirla · <span class="tag new">nueva</span> = sin representación previa detectada (lenguaje de incompletitud: "no encontrada", no "no existe").</p>
+
+  <div class="rule-card" data-mejora="M1">
+    <div class="rc-head"><span class="rc-num">M1</span><span class="rc-title">Reactivar entity resolution híbrido <span class="tag sed">archived + fractura</span></span></div>
+    <div class="rc-body">Hoy la identidad de conceptos es <code>name__iexact</code> + slug: "BD compartida" y "base de datos compartida" crean nodos duplicados. El diseño por embedding (≥0.92 mismo concepto, 0.75–0.91 ambiguo → confirmación) ya existe como concepto archivado en fractura crítica. La infraestructura (pgvector + <code>find_similar_concepts()</code>) ya está escrita y sin uso en el hot path.
+      <div class="why"><b>Por qué primero</b>Es la fractura con más palanca: cada duplicado erosiona weight (se reparte entre gemelos), promoción y búsqueda. Reactivarla además resuelve parte de los 13 discards target_not_found (targets con grafía distinta).</div>
+    </div>
+  </div>
+
+  <div class="rule-card" data-mejora="M2">
+    <div class="rc-head"><span class="rc-num">M2</span><span class="rc-title">Decay consciente de genealogía <span class="tag sed">dirección decidida</span></span></div>
+    <div class="rc-body">El decay actual es ciego: cada concepto envejece solo, y una fundación viva se duerme aunque algo encima respire — eso ES la fractura. La dirección ya está sedimentada (2026-06-06): propagar actividad hacia arriba por aristas de dependencia. Falta el mecanismo (fracción de refuerzo, profundidad de propagación, anti-ciclos).</div>
+  </div>
+
+  <div class="rule-card" data-mejora="M3">
+    <div class="rc-head"><span class="rc-num">M3</span><span class="rc-title">Batch real de embeddings <span class="tag new">nueva</span></span></div>
+    <div class="rc-body"><code>backfill_embeddings</code> hace 1 request HTTP por concepto (el <code>batch_size</code> actual solo agrupa logging). La API de OpenAI acepta listas en <code>input</code>: un batch de 100 textos por request reduciría latencia y costo del paso 2.7 en ~100×. Cambio acotado a <code>graph/embeddings.py</code>.</div>
+  </div>
+
+  <div class="rule-card" data-mejora="M4">
+    <div class="rc-head"><span class="rc-num">M4</span><span class="rc-title">Flag <code>--cron</code> no interactivo <span class="tag debt">prevista en el código</span></span></div>
+    <div class="rc-body">El prompt interactivo <code>[y/n]</code> del pre-flight bloquea automatización (el propio script lo anota: "Cron futuro requerira flag --cron"). Con él, el pipeline podría correr nocturno: batch de reviewed pendientes + maintenance + embeddings sin humano presente.</div>
+  </div>
+
+  <div class="rule-card" data-mejora="M5">
+    <div class="rc-head"><span class="rc-num">M5</span><span class="rc-title">Sedimentación del estado de deudas (cerrar la tautología inversa) <span class="tag new">nueva</span></span></div>
+    <div class="rc-body">El caso F47-D1.2 (deuda pagada en código, viva en el grafo) sugiere un mecanismo: cuando un YAML declara una relación <code>resolves</code> hacia un concepto-deuda, el sistema ya suprime alertas — pero nada detecta deudas resueltas <em>sin</em> sedimentación. Proyección: un check de mantenimiento que liste conceptos-brecha (eventos con "deuda"/"brecha" en el nombre) sin relación <code>resolves</code> entrante, para revisión del Guardian.</div>
+  </div>
+
+  <div class="rule-card" data-mejora="M6">
+    <div class="rc-head"><span class="rc-num">M6</span><span class="rc-title">Receta portable — qué llevarse a otra solución</span></div>
+    <div class="rc-body">Los siete componentes mínimos del patrón, ordenados por valor: (1) una sola BD como contrato escritor-batch/lector-online; (2) orquestador delgado + fases idempotentes invocables por separado; (3) pre-flight en cascada barato→caro con cuarentena selectiva; (4) idempotencia por tabla de registro (<code>update_or_create</code> + check de 3 estados); (5) embeddings como backfill desacoplado (<code>WHERE embedding IS NULL</code>); (6) nunca descartar en silencio — tabla de discards reconciliable; (7) flag <code>is_test</code> en origen, excluido de todos los agregados.
+      <div class="why"><b>Regla de oro</b>La ingesta nunca debe bloquearse por el servicio más frágil (el provider de embeddings): por eso (5) es backfill y no parte del extract.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== CAPA IA ===================== -->
+<details class="machine" data-block="machine-readable">
+<summary>▸ Bloque legible por máquina (resumen estructurado para IA)</summary>
+<pre>
+{
+  "doc": "reporte_pipeline_consumo_yaml",
+  "version": "1.0",
+  "estado": "vigente",
+  "fecha": "2026-06-10",
+  "productor": "CodeMCP",
+  "fuentes_verificadas": {
+    "orquestador": "concept-sediment/scripts/process_session.sh",
+    "commands": ["extract_concepts.py", "generate_embeddings.py", "is_processed.py", "recalculate_decay.py", "detect_fractures.py", "generate_active_concepts.py", "lint_sessions.py", "check_embedding_provider.py"],
+    "modelos": "concept-sediment/graph/models.py (Concept.add_occurrence:310, evaluate_promotion:379, _productive_occurrences:365)",
+    "embeddings": "concept-sediment/graph/embeddings.py",
+    "mcp": ["concept-sediment-mcp/server.py", "queries.py", "db.py"]
+  },
+  "arquitectura": {
+    "patron": "escritor batch (Django local) + lector online (FastMCP Railway) sobre Postgres+pgvector compartido",
+    "contrato_integracion": "schema de tablas graph_*, no una API",
+    "conexion_local": "DATABASE_URL -> proxy publico tramway.proxy.rlwy.net, keepalives + connect_timeout=10",
+    "consistencia": "inmediata al COMMIT para queries exactas; busqueda semantica espera backfill de embeddings (WHERE embedding IS NOT NULL)"
+  },
+  "pipeline": {
+    "fase0_preflight": {
+      "checks": ["existe", "status reviewed|smoke_test", "lint offline", "FULL vs LIGHT por dia", "DNS x3 backoff", "embedding provider (solo FULL)", "idempotencia is_processed"],
+      "politica": "cuarentena selectiva",
+      "exit_codes_is_processed": {"0": "no procesado", "1": "ya procesado", "2": "error DB -> abortar todo"}
+    },
+    "fase1_extract": {
+      "transaccion": "atomica por sesion",
+      "identidad": "name__iexact -> slug -> crear (UUID en Python); entity-resolution por embedding NO implementado (TODO Fase 2)",
+      "weight": "incrementa por depth (mention<usage<decision) via add_occurrence",
+      "relaciones": "RELATION_MAP -> RelationAlias(flip) -> RelationDiscard si irresoluble; interpreted_under -> FrameReference",
+      "smoke": "is_test=True persiste occurrence sin tocar weight/last_seen/projects",
+      "sello": "SessionLog.update_or_create status=PROCESSED + raw_yaml"
+    },
+    "fase2_mantenimiento": {"decay": "no-principle, recuperable, atribucion verbosa", "fracturas": "detect_fractures -> ALERTAS_HUMANDATO.md", "orden": "decay antes de fracturas"},
+    "fase27_embeddings": {"modo": "backfill desacoplado WHERE embedding IS NULL", "modelo": "OpenAI text-embedding-3-small 1536 dims", "nota": "1 request por concepto (batch real = mejora M3)"},
+    "lectura_mcp": {"busqueda": "1-(embedding <=> query_vec) cosine pgvector, umbral 0.3, excluye archived", "fallback": "ILIKE sin API key"}
+  },
+  "modos": {
+    "default_FULL": ["extract", "decay", "fracturas", "embeddings", "indices"],
+    "default_LIGHT": ["extract", "embeddings", "indices"],
+    "fast": ["extract"],
+    "maintenance": ["decay", "fracturas", "indices"],
+    "skip_decay": ["extract", "fracturas?", "embeddings", "indices"],
+    "patron_batch": "N x --fast, 1 x --maintenance, 1 x generate_embeddings --status active"
+  },
+  "tautologia_contraste_grafo": {
+    "metodo": "cs_session_open 5 queries 2026-06-10",
+    "ya_sedimentado": [
+      {"hallazgo": "no descarte silencioso", "concepto": "Axioma de no-descarte de discordancias schema-YAML", "tipo": "principle", "fecha": "2026-05-05"},
+      {"hallazgo": "smoke is_test ortogonal", "concepto": "Extension SessionStatus smoke_test + is_test", "tipo": "axioma F47-D1", "fecha": "2026-05-09"},
+      {"hallazgo": "filtrado is_test en MCP", "concepto": "Filtrado is_test en queries productivas del MCP", "fecha": "2026-05-09"},
+      {"hallazgo": "entity resolution embedding", "concepto": "entity resolution hibrido", "estado": "archived w=2.0 EN FRACTURA", "fecha": "2026-03-19"},
+      {"hallazgo": "decay consciente de dependencias", "concepto": "Refuerzo transitivo por aristas de genealogia", "estado": "direccion decidida, mecanismo diferido", "fecha": "2026-06-06"},
+      {"hallazgo": "atribucion verbosa decay", "concepto": "Visibilidad estructural del decay como vacuna", "fecha": "2026-05-10"}
+    ],
+    "tautologia_inversa": {
+      "caso": "F47-D1.2: grafo registra deuda 'process_session.sh rechaza smoke_test' pero process_session.sh:303-305 ya la acepta ([OK SMOKE])",
+      "accion_sugerida": "sedimentar resolucion de F47-D1.2 en proximo YAML de cierre"
+    },
+    "conclusion": "codigo y grafo convergen con retardo bidireccional; el pipeline es el mecanismo que reduce ese retardo"
+  },
+  "evidencia_viva": {"relation_discards_pending": 25, "by_reason": {"unknown_type": 12, "target_not_found": 13}, "oldest_days": 29},
+  "mejoras": [
+    {"id": "M1", "titulo": "reactivar entity resolution hibrido", "status_grafo": "archived+fractura", "prioridad": "alta"},
+    {"id": "M2", "titulo": "decay consciente de genealogia", "status_grafo": "direccion decidida"},
+    {"id": "M3", "titulo": "batch real de embeddings (lista en input, ~100x)", "status_grafo": "nueva"},
+    {"id": "M4", "titulo": "flag --cron no interactivo", "status_grafo": "prevista en comentario del script"},
+    {"id": "M5", "titulo": "detector de deudas pagadas sin sedimentar", "status_grafo": "nueva"},
+    {"id": "M6", "titulo": "receta portable 7 componentes", "regla_oro": "ingesta nunca bloqueada por el servicio mas fragil"}
+  ],
+  "receta_portable": ["BD unica como contrato", "orquestador delgado + fases idempotentes", "preflight cascada barato->caro con cuarentena", "idempotencia por tabla de registro + exit codes 3 estados", "embeddings como backfill", "discards reconciliables nunca silencio", "is_test excluido de agregados"]
+}
+</pre>
+</details>
+
+<footer>Concept-Sediment · CodeMCP · Reporte Pipeline Consumo YAML v1.0 · 2026-06-10 · cumple Protocolo HTML Doble Capa R1–R6 (INDUCOP v1.0)</footer>
+
+</div>
+</body>
+</html>
