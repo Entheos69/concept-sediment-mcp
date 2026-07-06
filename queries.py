@@ -20,22 +20,43 @@ logger = logging.getLogger(__name__)
 # ── Embeddings (para búsqueda semántica) ──
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+# H1 auditoria 2026-07-05: sin timeout, el default del SDK (~600s + 2 retries)
+# cuelga el tool MCP mas alla de sus 180s y el fallback ILIKE nunca dispara
+# (solo cubre fallo, no lentitud). Acotamos: timeout corto + 1 retry.
+EMBEDDING_TIMEOUT_S = float(os.environ.get("EMBEDDING_TIMEOUT_S", "8"))
+
+_openai_client = None  # cliente unico a nivel modulo (no uno por query)
+
+
+def _get_client():
+    global _openai_client
+    if _openai_client is None:
+        from openai import OpenAI
+        _openai_client = OpenAI(
+            api_key=OPENAI_API_KEY,
+            timeout=EMBEDDING_TIMEOUT_S,
+            max_retries=1,
+        )
+    return _openai_client
 
 
 def _generate_query_embedding(query_text: str) -> list | None:
-    """Genera embedding para un query de búsqueda."""
+    """Genera embedding para un query de búsqueda.
+
+    Retorna None si falla O si excede EMBEDDING_TIMEOUT_S: en ambos casos
+    el caller (cs_search_concepts) cae a busqueda ILIKE. Degradacion
+    explicita en vez de cuelgue.
+    """
     if not OPENAI_API_KEY:
         return None
     try:
-        from openai import OpenAI
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        response = client.embeddings.create(
+        response = _get_client().embeddings.create(
             model=EMBEDDING_MODEL,
             input=query_text.strip(),
         )
         return response.data[0].embedding
     except Exception as e:
-        logger.warning("Embedding generation failed: %s", e)
+        logger.warning("Embedding generation failed (fallback a ILIKE): %s", e)
         return None
 
 
