@@ -1,5 +1,7 @@
 # Concept Sediment MCP Server
-fastmcp>=3.1.0
+# Pineado: 3.4.3 introdujo validación Host/Origin (421 sin allowed_hosts).
+# server.py ya la configura — no despinear sin revisar HostOriginGuardMiddleware.
+fastmcp==3.4.3
 sqlalchemy>=2.0
 psycopg2-binary>=2.9
 openai>=1.0

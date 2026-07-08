@@ -57,6 +57,27 @@ from audit_queries import init_audit_log_table, get_audit_log
 MCP_PORT = int(os.environ.get("MCP_PORT", os.environ.get("PORT", "8000")))
 MCP_HOST = os.environ.get("MCP_HOST", "0.0.0.0")
 
+# fastmcp >= 3.4.3 valida el header Host (protección DNS-rebinding) y responde
+# 421 Misdirected Request si no está en la lista. Detrás del proxy de Railway
+# el bind es 0.0.0.0 (unspecified), así que el default queda localhost-only:
+# hay que declarar el dominio público explícitamente. El puerto se normaliza
+# fuera del matching (dominio pelado, sin ':*').
+MCP_ALLOWED_HOSTS = [
+    h.strip()
+    for h in os.environ.get(
+        "MCP_ALLOWED_HOSTS",
+        "mcp-server-production-994a.up.railway.app",
+    ).split(",")
+    if h.strip()
+]
+# Origin ausente pasa la validación (clientes MCP no-browser no lo envían);
+# si un cliente browser lo requiere, declararlo aquí vía env var.
+MCP_ALLOWED_ORIGINS = [
+    o.strip()
+    for o in os.environ.get("MCP_ALLOWED_ORIGINS", "").split(",")
+    if o.strip()
+]
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
@@ -918,7 +939,10 @@ async def health(request):
         "version": "1.0.0",
     })
 
-mcp_http = mcp.http_app()
+mcp_http = mcp.http_app(
+    allowed_hosts=MCP_ALLOWED_HOSTS,
+    allowed_origins=MCP_ALLOWED_ORIGINS or None,
+)
 
 app = Starlette(
     routes=[
