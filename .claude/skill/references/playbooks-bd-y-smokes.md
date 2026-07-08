@@ -78,7 +78,7 @@ Convención de naming: `sessions/TEST-YYYY-MM-DD-<purpose>-smoke.yaml`. Campos:
 `process_session.sh` pre-flight CHECK 2/6 actualmente solo acepta `reviewed` (deuda F47-D1.2 en backlog). Mientras esa brecha no se cierre, **bypass directo**:
 
 ```bash
-cd /c/Users/ajmon/env/Scripts/concept-sediment
+cd /c/Users/ajmon/proyectos/concept-sediment
 railway run python manage.py extract_concepts \
   --file sessions/TEST-<...>-smoke.yaml \
   --skip-embeddings -v 2
@@ -153,7 +153,7 @@ railway run python manage.py cleanup_smoke_session \
 
 Post BD-cleanup, eliminar el archivo YAML smoke:
 ```bash
-rm /c/Users/ajmon/env/Scripts/concept-sediment/sessions/TEST-<...>-smoke.yaml
+rm /c/Users/ajmon/proyectos/concept-sediment/sessions/TEST-<...>-smoke.yaml
 ```
 
 Por convención del diseño smoke (línea 39 del propio YAML smoke).

@@ -107,6 +107,24 @@ Pregunta mnemotécnica al clasificar: *"¿Esto INFORMÓ una decisión, se APLIC�
 
 ---
 
+## FM-6: Deriva de dependencia sin pin rompe producción sin cambio de código
+
+**Síntoma:** todo `/mcp` responde `421 Misdirected Request` (o comportamiento nuevo inexplicado) tras un deploy cuyo diff era inofensivo; `/health` responde 200; el arranque en logs es limpio.
+
+**Causa:** `requirements.txt` con rangos abiertos (`fastmcp>=3.1.0`) y `pip install` sin lockfile en el Dockerfile: cada rebuild de Railway resuelve la última versión upstream. fastmcp 3.4.3 (release 2026-07-05) introdujo `HostOriginGuardMiddleware` (valida header Host pre-sesión; con bind `0.0.0.0` el default queda localhost-only) y el rebuild disparado por el push H1 (`e63853c`, 2026-07-06) la trajo silenciosamente.
+
+**Ejemplo:** sesión 2026-07-07-001-CodeMCP — MCP caído para todos los consumidores hasta el fix `4e02809` (allowed_hosts vía env `MCP_ALLOWED_HOSTS` + pin `fastmcp==3.4.3`). Verificado con repro A/B in-process, 9 tests y sonda a prod.
+
+**Mitigación:** pin exacto de `fastmcp` en `requirements.txt` con comentario que prohíbe despinear sin revisar el middleware; `MCP_ALLOWED_HOSTS`/`MCP_ALLOWED_ORIGINS` configurables por env var.
+
+**Prevención:**
+- Al bumpear cualquier dependencia del server: leer el changelog upstream ANTES del push (especialmente cambios de seguridad con nuevos defaults).
+- Diagnóstico: logs de Railway primero — 4xx registrados en `/mcp` = server (config/deps); sin registro o 200 = acceso de la ventana (ver memoria `reference_mcp_invalid_content_es_acceso_ventana`).
+- Verificar firmas de API contra el paquete instalado (venv aislado + `inspect.signature`), no contra docs/snippets externos: los snippets con `TransportSecuritySettings` son del SDK low-level, no del paquete `fastmcp`.
+- Pendiente declarado: `sqlalchemy`, `openai`, `uvicorn` siguen sin pin — mismo riesgo.
+
+---
+
 ## Cómo agregar nuevos failure modes
 
 Estructura por FM:

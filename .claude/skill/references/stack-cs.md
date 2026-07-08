@@ -11,7 +11,7 @@ Vista del sistema desde la perspectiva de CodeCS (mantenedor, no solo consumidor
 | **Sessions store** | YAMLs draft/reviewed producidos por agentes | `sessions/` |
 | **Knowledge graph** | Grafo procesado y consolidado | `knowledge/*.yaml` |
 | **WAL** | Write-ahead log JSONL durante sesión activa | `sessions/_WM_Code_*.jsonl` |
-| **Convención WAL** | Spec de la convención anti-sesgo de recencia | `C:/Users/ajmon/env/Scripts/docs_inducop/organizacion/.wm/CONVENCION_WM.md` |
+| **Convención WAL** | Spec de la convención anti-sesgo de recencia | `C:/Users/ajmon/proyectos/docs_inducop/organizacion/.wm/CONVENCION_WM.md` |
 
 ## Flujo de datos
 
