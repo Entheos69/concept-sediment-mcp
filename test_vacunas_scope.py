@@ -66,8 +66,8 @@ ESPERADO = {
 
 
 def test_scope_project_specific():
-    original = hq.VCM_DIRECTIVES
-    hq.VCM_DIRECTIVES = CONTROLES
+    original = hq.load_vcm_directives
+    hq.load_vcm_directives = lambda session=None: (CONTROLES, "test")
     ok = True
     try:
         for project, esperado in ESPERADO.items():
@@ -81,7 +81,7 @@ def test_scope_project_specific():
                     f"obtenido {sorted(ladran)}"
                 )
     finally:
-        hq.VCM_DIRECTIVES = original
+        hq.load_vcm_directives = original
     return ok
 
 
@@ -98,7 +98,8 @@ def test_sin_falsos_positivos_reales():
     sin_proyecto = ladran(None)
     ok = True
 
-    for vcm in hq.VCM_DIRECTIVES:
+    directivas, _ = hq.load_vcm_directives()
+    for vcm in directivas:
         if vcm.get("scope") != "project_specific":
             continue
         aplicables = vcm.get("applicable_projects", [])

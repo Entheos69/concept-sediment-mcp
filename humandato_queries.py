@@ -7,33 +7,34 @@ Dos tipos de alerta:
   1. Fracturas: concepto dormant/archived con dependientes activos
   2. Vacunas faltantes: directivas VCM sin representacion en el grafo
 """
+import logging
 from typing import Optional
 
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from db import get_session
+
+logger = logging.getLogger(__name__)
 
 
 # ════════════════════════════════════════════════════════════════
 # VCM: Vector de Conocimiento Minimo
 # ════════════════════════════════════════════════════════════════
 
-# GEMELO CROSS-REPO ABIERTO (anotado 2026-07-14, HANDOFF de CodeCS).
-# Esta lista es una COPIA divergente de concept-sediment/graph/humandato_queries.py:
-#   - DATOS: RESINCRONIZADO 2026-07-14 (9 == 9). Faltaban aqui `name es
-#     identificador` (min_weight 2.0) y `veredicto adjudicado` (critical): nunca
-#     habian podido ladrar en cs_get_alerts porque no existian en esta lista.
-#     Resincronizar a mano NO cierra el gemelo — vuelve a driftear en cuanto
-#     alguien edite un solo lado. Es un parche al sintoma, con fecha.
-#   - LOGICA: get_missing_vaccines() de ESTE repo honra `scope` (filtra
-#     project_specific por c.projects); el de Django aun NO (matchea por name
-#     globalmente). Aqui la logica es la buena; alla los datos.
-# CONSECUENCIA, mientras el gemelo siga abierto: cs_get_alerts NO es autoridad
-# sobre las vacunas de concept-sediment. El estado real se consulta con
-# get_missing_vaccines() de aquel repo.
-# CIERRE PROPUESTO: tabla vcm_directive en el Postgres compartido (fuente unica
-# como DATO, no como codigo) -> docs/HANDOFF_CodeMCP_a_CodeCS_vcm_fuente_unica_2026-07-14.md
-VCM_DIRECTIVES = [
+# FUENTE DE VERDAD: tabla `graph_vcmdirective` del Postgres compartido (sembrada
+# por CodeCS el 2026-07-14, 9 directivas). Se lee con load_vcm_directives().
+#
+# Esta constante YA NO ES FUENTE: es solo el FALLBACK si la tabla no esta
+# disponible (deploy fuera de orden, BD sin migrar). Vale como red de seguridad,
+# no como autoridad — puede driftear, y de hecho drifteo: fue el gemelo cross-repo
+# que tenia 7 directivas contra las 9 de concept-sediment, con `name es
+# identificador` y `veredicto adjudicado` ausentes, incapaces de ladrar.
+#
+# Cuando ambos repos lean la tabla y el Guardian lo autorice, esta lista SE BORRA
+# (paso 3 del contrato). Mientras exista, no editarla para "actualizar" una
+# vacuna: se edita la TABLA. Editar aqui es reabrir el gemelo.
+VCM_DIRECTIVES_FALLBACK = [
     # ════════════════════════════════════════════════════════════════
     # VACUNAS GLOBALES: aplican a todos los proyectos
     # Si existen en CUALQUIER proyecto del grafo, protegen a TODOS
@@ -179,6 +180,86 @@ VCM_DIRECTIVES = [
 ]
 
 
+# Vigencia = revoked_at IS NULL. La tabla NO tiene flag is_active: revocar una
+# vacuna anexa fecha + razon y conserva la fila (misma doctrina que el evento
+# `revision` en WORM: anexar, no mutar).
+VCM_LOAD_SQL = """
+SELECT
+    name,
+    scope,
+    applicable_projects,
+    category,
+    severity,
+    directive,
+    min_weight,
+    failure_history
+FROM graph_vcmdirective
+WHERE revoked_at IS NULL
+ORDER BY name
+"""
+
+
+def load_vcm_directives(session=None) -> tuple[list[dict], str]:
+    """Carga las directivas VCM desde la fuente unica (Postgres compartido).
+
+    Fuente: tabla `graph_vcmdirective` (dominio Django/CodeCS, la siembra el
+    repo concept-sediment). Este modulo solo LEE.
+
+    Fallback: si la tabla no existe o la consulta falla (deploy fuera de orden,
+    BD sin migrar), devuelve la constante local y lo DECLARA en el valor de
+    retorno — un fallback silencioso volveria a ser el gemelo, ahora invisible.
+
+    Args:
+        session: sesion SQLAlchemy existente. Si None, abre y cierra la suya.
+            Inyectarla permite leer dentro de una transaccion abierta (lo usa el
+            contrafactual del test: insertar -> ver ladrar -> rollback, sin
+            escribir en la tabla de produccion).
+
+    Returns:
+        (directivas, fuente) donde fuente es 'db' o 'fallback'
+    """
+    own_session = session is None
+    if own_session:
+        session = get_session()
+    try:
+        rows = session.execute(text(VCM_LOAD_SQL)).fetchall()
+    except SQLAlchemyError as exc:
+        logger.warning(
+            "[VCM] graph_vcmdirective no disponible (%s). "
+            "Usando constante local VCM_DIRECTIVES_FALLBACK (%d directivas). "
+            "Las vacunas pueden estar desactualizadas respecto de la tabla.",
+            exc.__class__.__name__,
+            len(VCM_DIRECTIVES_FALLBACK),
+        )
+        return VCM_DIRECTIVES_FALLBACK, "fallback"
+    finally:
+        if own_session:
+            session.close()
+
+    if not rows:
+        logger.warning(
+            "[VCM] graph_vcmdirective existe pero esta vacia. "
+            "Usando constante local (%d directivas).",
+            len(VCM_DIRECTIVES_FALLBACK),
+        )
+        return VCM_DIRECTIVES_FALLBACK, "fallback"
+
+    directivas = [
+        {
+            "name": r.name,
+            "scope": r.scope,
+            "applicable_projects": list(r.applicable_projects or []),
+            "category": r.category,
+            "severity": r.severity,
+            "directive": r.directive,
+            "min_weight": r.min_weight,
+            "failure_history": r.failure_history,
+        }
+        for r in rows
+    ]
+    return directivas, "db"
+
+
 # ════════════════════════════════════════════════════════════════
 # FRACTURAS: conceptos debilitados con dependientes activos
 # ════════════════════════════════════════════════════════════════
@@ -285,17 +366,29 @@ LIMIT 1
 """
 
 
-def get_missing_vaccines(project: Optional[str] = None) -> list[dict]:
+def get_missing_vaccines(project: Optional[str] = None, session=None) -> list[dict]:
     """Detecta vacunas faltantes: directivas VCM sin representación suficiente.
+
+    Las directivas se leen de la fuente unica (tabla graph_vcmdirective), con
+    fallback declarado a la constante local — ver load_vcm_directives().
 
     Vacunas globales: buscan en TODO el grafo (project-agnostic).
     Vacunas project-specific: solo verifican en proyectos aplicables.
+
+    Args:
+        project: filtrar por proyecto
+        session: sesion existente (ver load_vcm_directives). Si None, abre la suya.
     """
-    session = get_session()
+    own_session = session is None
+    if own_session:
+        session = get_session()
+
+    directivas, _fuente = load_vcm_directives(session=session)
+
     try:
         missing = []
 
-        for vcm in VCM_DIRECTIVES:
+        for vcm in directivas:
             pattern = f"%{vcm['name']}%"
 
             # Determinar scope (default: global para retrocompatibilidad)
@@ -368,7 +461,8 @@ def get_missing_vaccines(project: Optional[str] = None) -> list[dict]:
         return missing
 
     finally:
-        session.close()
+        if own_session:
+            session.close()
 
 
 # ════════════════════════════════════════════════════════════════
