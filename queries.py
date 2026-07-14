@@ -17,6 +17,28 @@ from db import get_session
 
 logger = logging.getLogger(__name__)
 
+# Corte de `description` en los payloads de busqueda (no en cs_get_concept_graph,
+# que devuelve la description completa).
+DESC_MAX = 300
+
+
+def _desc(raw: str, limit: int = DESC_MAX) -> tuple[str, bool]:
+    """Recorta description declarando el corte.
+
+    Auditoria 2026-07-14 (H5): se truncaba a 300 chars SIN marcador, asi que el
+    consumidor recibia un texto cortado con aspecto de completo. Importa mas de
+    lo que parece: CodeCS sedimento el mismo dia que un corolario sepultado en
+    la `description` se cita como si fuera nodo — si ademas el corolario cae
+    detras del corte, es invisible y nadie sabe que hay un mas alla.
+
+    Returns:
+        (texto, truncado)
+    """
+    text_ = (raw or "").strip()
+    if len(text_) <= limit:
+        return text_, False
+    return text_[:limit].rstrip() + "...", True
+
 # ── Embeddings (para búsqueda semántica) ──
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
@@ -46,8 +68,14 @@ def _generate_query_embedding(query_text: str) -> list | None:
     Retorna None si falla O si excede EMBEDDING_TIMEOUT_S: en ambos casos
     el caller (cs_search_concepts) cae a busqueda ILIKE. Degradacion
     explicita en vez de cuelgue.
+
+    OJO: "None" NO significa "sin resultados", significa "no pude preguntar".
+    Quien lo llame debe PROPAGAR esa distincion al consumidor — ver
+    search_concepts(). Loguearla y devolver una lista vacia convierte un fallo
+    de infraestructura en un "no existe" (auditoria 2026-07-14, H1).
     """
     if not OPENAI_API_KEY:
+        logger.warning("[SEARCH] Sin OPENAI_API_KEY: la busqueda sera lexica, no semantica")
         return None
     try:
         response = _get_client().embeddings.create(
@@ -60,17 +88,92 @@ def _generate_query_embedding(query_text: str) -> list | None:
         return None
 
 
+# Motores de busqueda posibles, tal como se le declaran al consumidor.
+SEARCH_MODE_EMBEDDING = "embedding"          # semantica, sana
+SEARCH_MODE_TEXT = "text"                    # lexica: el semantico no dio hits
+SEARCH_MODE_TEXT_DEGRADED = "text_degraded"  # lexica: el semantico NO PUDO correr
+
+DEGRADED_WARNING = (
+    "BUSQUEDA DEGRADADA: el motor semantico (embeddings) no pudo ejecutarse "
+    "-- sin API key, fallo del proveedor o timeout. Se respondio con busqueda "
+    "LEXICA (ILIKE), que matchea la frase literal: una query en lenguaje "
+    "natural puede devolver 0 resultados AUNQUE EL CONCEPTO EXISTA. "
+    "Un vacio bajo este modo NO es evidencia de ausencia."
+)
+
+
+def search_concepts(query: str, domain: str = None, project: str = None,
+                    limit: int = 10) -> dict:
+    """Busqueda de conceptos que DECLARA con que motor respondio.
+
+    Antes (auditoria 2026-07-14, H1) el fallback era mudo: si el embedding no
+    podia generarse, se devolvia [] y el caller caia a ILIKE sin decirselo a
+    nadie. Como ILIKE busca la frase literal, una query en lenguaje natural
+    devolvia 0 resultados — indistinguible de "el concepto no existe". El
+    sistema SABIA que habia degradado (lo logueaba) y no lo entregaba.
+
+    Returns:
+        dict con: concepts, count, search_mode, degraded (bool) y, si degraded,
+        warning explicito.
+    """
+    embedding = _generate_query_embedding(query)
+
+    if embedding is None:
+        # No es que no haya resultados: es que no se pudo preguntar.
+        concepts = search_concepts_by_text(query, domain, project, limit)
+        return {
+            "concepts": concepts,
+            "count": len(concepts),
+            "search_mode": SEARCH_MODE_TEXT_DEGRADED,
+            "degraded": True,
+            "warning": DEGRADED_WARNING,
+        }
+
+    concepts = _search_by_embedding_vec(embedding, domain, project, limit)
+    if concepts:
+        return {
+            "concepts": concepts,
+            "count": len(concepts),
+            "search_mode": SEARCH_MODE_EMBEDDING,
+            "degraded": False,
+        }
+
+    # El semantico corrio y no encontro nada: el fallback lexico es un intento
+    # extra legitimo, no una degradacion.
+    concepts = search_concepts_by_text(query, domain, project, limit)
+    return {
+        "concepts": concepts,
+        "count": len(concepts),
+        "search_mode": SEARCH_MODE_TEXT,
+        "degraded": False,
+    }
+
+
 # ════════════════════════════════════════════════════════════════
 # TOOL 1: search_concepts
 # ════════════════════════════════════════════════════════════════
 
 def search_concepts_by_embedding(query: str, domain: str = None,
                                   project: str = None, limit: int = 10) -> list:
-    """Búsqueda semántica por embedding en pgvector."""
+    """Búsqueda semántica por embedding en pgvector.
+
+    COMPATIBILIDAD: devuelve [] tanto si el embedding fallo como si no hubo
+    hits — esa ambiguedad es justo el bug H1. Preferir search_concepts(), que
+    declara el modo. Se conserva porque hay callers que solo quieren la lista.
+    """
     embedding = _generate_query_embedding(query)
     if not embedding:
         return []
+    return _search_by_embedding_vec(embedding, domain, project, limit)
 
+
+def _search_by_embedding_vec(embedding: list, domain: str = None,
+                             project: str = None, limit: int = 10) -> list:
+    """Consulta pgvector con un embedding YA generado.
+
+    Separado de la generacion para que el caller pueda distinguir
+    "no pude preguntar" de "pregunte y no hay nada".
+    """
     vec_str = "[" + ",".join(str(f) for f in embedding) + "]"
 
     sql = """
@@ -107,11 +210,13 @@ def search_concepts_by_embedding(query: str, domain: str = None,
         rows = session.execute(text(sql), params).fetchall()
         results = []
         for row in rows:
+            desc, truncated = _desc(row.description)
             r = {
                 "name": row.name,
                 "type": row.type,
                 "status": row.status,
-                "description": (row.description or "")[:300],
+                "description": desc,
+                "description_truncated": truncated,
                 "weight": round(row.weight, 1),
                 "similarity": round(row.similarity, 4),
                 "last_seen": row.last_seen_at.strftime("%Y-%m-%d") if row.last_seen_at else None,
@@ -162,12 +267,18 @@ def search_concepts_by_text(query: str, domain: str = None,
         rows = session.execute(text(sql), params).fetchall()
         results = []
         for row in rows:
+            desc, truncated = _desc(row.description)
             results.append({
                 "name": row.name,
                 "type": row.type,
                 "status": row.status,
-                "description": (row.description or "")[:300],
+                "description": desc,
+                "description_truncated": truncated,
                 "weight": round(row.weight, 1),
+                # Explicito: ILIKE no puntua. Antes el campo simplemente NO
+                # estaba, y cs_session_open lo leia como 0.0 al rankear, hundiendo
+                # los hits lexicos contra los semanticos sin decirlo (H3).
+                "similarity": None,
                 "last_seen": row.last_seen_at.strftime("%Y-%m-%d") if row.last_seen_at else None,
                 "domains": row.domains_list or [],
                 "projects": row.projects or [],
@@ -311,6 +422,49 @@ def get_concept_with_relations(concept_name: str, depth: int = 1) -> dict | None
             LIMIT 5
         """), {"cid": concept_id}).fetchall()
 
+        # depth > 1: expandir transitivamente. Auditoria 2026-07-14 (H2): el
+        # parametro se aceptaba (1-3, "1=directas, 2=transitivas" en la
+        # docstring y en el skill) y NO SE USABA — depth=3 devolvia exactamente
+        # lo mismo que depth=1. Parametro fantasma: el consumidor pedia
+        # profundidad y recibia otra cosa, sin aviso.
+        transitive = []
+        if depth > 1:
+            frontier = {concept_id}
+            visited = {concept_id}
+            for nivel in range(2, depth + 1):
+                if not frontier:
+                    break
+                vecinos = session.execute(text("""
+                    SELECT
+                        r.relation_type, r.strength,
+                        s.id AS source_id, s.name AS source_name,
+                        t.id AS target_id, t.name AS target_name,
+                        t.type AS target_type, t.weight AS target_weight
+                    FROM graph_conceptrelation r
+                    JOIN graph_concept s ON s.id = r.source_id
+                    JOIN graph_concept t ON t.id = r.target_id
+                    WHERE (r.source_id = ANY(:ids) OR r.target_id = ANY(:ids))
+                    ORDER BY r.strength DESC
+                """), {"ids": list(frontier)}).fetchall()
+
+                nueva_frontera = set()
+                for v in vecinos:
+                    for extremo_id, extremo_name in (
+                        (v.source_id, v.source_name),
+                        (v.target_id, v.target_name),
+                    ):
+                        if extremo_id in visited:
+                            continue
+                        visited.add(extremo_id)
+                        nueva_frontera.add(extremo_id)
+                        transitive.append({
+                            "level": nivel,
+                            "concept": extremo_name,
+                            "via_relation": v.relation_type,
+                            "strength": round(v.strength, 1),
+                        })
+                frontier = nueva_frontera
+
         return {
             "concept": {
                 "name": concept_row.name,
@@ -322,6 +476,7 @@ def get_concept_with_relations(concept_name: str, depth: int = 1) -> dict | None
                 "domains": concept_row.domains_list or [],
                 "projects": concept_row.projects or [],
             },
+            "depth_requested": depth,
             "outgoing_relations": [
                 {
                     "relation": r.relation_type,
@@ -340,6 +495,8 @@ def get_concept_with_relations(concept_name: str, depth: int = 1) -> dict | None
                 }
                 for r in incoming
             ],
+            # Vacio cuando depth=1: el nivel 1 YA esta en outgoing/incoming.
+            "transitive_relations": transitive,
             "recent_occurrences": [
                 {
                     "session": o.session_id,
@@ -349,6 +506,8 @@ def get_concept_with_relations(concept_name: str, depth: int = 1) -> dict | None
                 }
                 for o in occurrences
             ],
+            "occurrences_shown": len(occurrences),
+            "occurrences_note": "solo las 5 mas recientes",
         }
     finally:
         session.close()
@@ -489,18 +648,27 @@ def get_session_context_data(project: str = None, domains: list = None,
     try:
         rows = session.execute(text(sql), params).fetchall()
 
+        # H6 (auditoria 2026-07-14): si el LIMIT recorto, decirlo. Antes se
+        # reportaba "Conceptos: N" a secas, y N era lo devuelto, no lo que hay:
+        # el agente que abre sesion creia estar viendo su dominio entero.
+        posible_recorte = len(rows) == limit
+
         if output_format == "json":
             concepts = []
             for row in rows:
+                desc, truncated = _desc(row.description)
                 concepts.append({
                     "name": row.name,
                     "type": row.type,
-                    "description": (row.description or "")[:300],
+                    "description": desc,
+                    "description_truncated": truncated,
                     "weight": round(row.weight, 1),
                     "domains": row.domains_list or [],
                 })
             return json.dumps({
                 "total": len(concepts),
+                "limit": limit,
+                "possibly_truncated": posible_recorte,
                 "generated": date.today().isoformat(),
                 "concepts": concepts,
             }, ensure_ascii=False, indent=2)
@@ -511,6 +679,9 @@ def get_session_context_data(project: str = None, domains: list = None,
         lines.append(f"# Contexto de Sesión{' - ' + project.upper() if project else ''}")
         lines.append(f"# Generado: {date.today().isoformat()} | "
                       f"Dominios: {domain_label} | Conceptos: {len(rows)}")
+        if posible_recorte:
+            lines.append(f"# [AVISO] Se alcanzo el limite ({limit}): puede haber "
+                          f"MAS conceptos sin mostrar. Esto no es el dominio completo.")
         lines.append("")
 
         current_type = None

@@ -41,7 +41,8 @@ from pydantic import BaseModel, Field
 
 from db import get_engine, get_session, dispose_engine
 from queries import (
-    search_concepts_by_embedding,
+    DEGRADED_WARNING,
+    search_concepts,
     search_concepts_by_text,
     get_active_concepts,
     get_concept_with_relations,
@@ -141,26 +142,26 @@ def cs_search_concepts(params: SearchConceptsInput) -> str:
     con fallback a búsqueda por texto (ILIKE). Retorna conceptos con
     dominios, tipo, status, weight y similaridad.
     """
-    results = search_concepts_by_embedding(
+    res = search_concepts(
         query=params.query,
         domain=params.domain,
         project=params.project,
         limit=params.limit,
     )
 
-    if not results:
-        results = search_concepts_by_text(
-            query=params.query,
-            domain=params.domain,
-            project=params.project,
-            limit=params.limit,
-        )
-
-    return json.dumps({
-        "count": len(results),
+    # search_mode/degraded/warning viajan al consumidor: un vacio en modo
+    # degradado NO es evidencia de ausencia (auditoria 2026-07-14, H1).
+    payload = {
+        "count": res["count"],
         "query": params.query,
-        "concepts": results,
-    }, ensure_ascii=False, indent=2)
+        "search_mode": res["search_mode"],
+        "degraded": res["degraded"],
+        "concepts": res["concepts"],
+    }
+    if res.get("warning"):
+        payload["warning"] = res["warning"]
+
+    return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -442,48 +443,66 @@ def cs_session_open(params: SessionOpenInput) -> str:
     No toma decisiones metodológicas: solo compone tools existentes.
     """
     per_query_results = {}
+    modes_por_query = {}
     all_concepts = {}  # name -> mejor result observado entre queries
+    degradadas = []
 
     for q in params.queries:
-        results = search_concepts_by_embedding(
+        res = search_concepts(
             query=q,
             domain=params.domain,
             project=params.project,
             limit=params.limit_per_query,
         )
-        if not results:
-            results = search_concepts_by_text(
-                query=q,
-                domain=params.domain,
-                project=params.project,
-                limit=params.limit_per_query,
-            )
+        results = res["concepts"]
         per_query_results[q] = results
+        modes_por_query[q] = res["search_mode"]
+        if res["degraded"]:
+            degradadas.append(q)
 
         for r in results:
             name = r["name"]
-            sim = r.get("similarity", 0.0) or 0.0
+            sim = r.get("similarity")
             existing = all_concepts.get(name)
-            existing_sim = (existing.get("similarity", 0.0) or 0.0) if existing else -1
-            if sim > existing_sim:
+            existing_sim = existing.get("similarity") if existing else None
+            # Un hit lexico (similarity=None) no compite contra uno semantico:
+            # antes entraba como 0.0 y se hundia al fondo del ranking "por mejor
+            # similaridad", mezclando dos escalas sin decirlo (H3). Ahora solo
+            # se compara sim contra sim; el lexico entra si no habia nada.
+            if existing is None:
+                all_concepts[name] = r
+            elif sim is not None and (existing_sim is None or sim > existing_sim):
                 all_concepts[name] = r
 
-    deduped_ranked = sorted(
-        all_concepts.values(),
-        key=lambda r: r.get("similarity", 0.0) or 0.0,
-        reverse=True,
+    con_sim = [r for r in all_concepts.values() if r.get("similarity") is not None]
+    sin_sim = [r for r in all_concepts.values() if r.get("similarity") is None]
+    deduped_ranked = (
+        sorted(con_sim, key=lambda r: r["similarity"], reverse=True) + sin_sim
     )
 
     alerts = get_all_alerts(project=params.project)
 
-    return json.dumps({
+    payload = {
         "topic": params.topic,
         "queries_count": len(params.queries),
         "concepts_total_unique": len(deduped_ranked),
+        "search_modes": modes_por_query,
+        "ranking_note": (
+            "concepts_ranked ordena por similarity (semantica). Los hits lexicos "
+            "(similarity=null) NO son comparables y van al final, sin ranking."
+        ),
         "concepts_ranked": deduped_ranked,
         "concepts_per_query": per_query_results,
         "alerts": alerts,
-    }, ensure_ascii=False, indent=2, default=str)
+    }
+    if degradadas:
+        payload["degraded"] = True
+        payload["warning"] = (
+            f"{len(degradadas)} de {len(params.queries)} queries corrieron DEGRADADAS "
+            f"(sin motor semantico): {degradadas}. {DEGRADED_WARNING}"
+        )
+
+    return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -640,9 +659,29 @@ def cs_audit_thread(params: AuditThreadInput) -> str:
                 depth=1,
             )
             if graph_data:
-                entry["outgoing_relations"] = graph_data["outgoing_relations"][:5]
-                entry["incoming_relations"] = graph_data["incoming_relations"][:5]
-                entry["recent_occurrences"] = graph_data["recent_occurrences"][:3]
+                out = graph_data["outgoing_relations"]
+                inc = graph_data["incoming_relations"]
+                occ = graph_data["recent_occurrences"]
+
+                entry["outgoing_relations"] = out[:5]
+                entry["incoming_relations"] = inc[:5]
+                entry["recent_occurrences"] = occ[:3]
+
+                # Esta es la tool que MIDE cobertura: recortar su propia medicion
+                # sin declararlo la volvia complice del hueco que busca (H4).
+                # Un concepto con 12 relaciones se reportaba con 5, en silencio.
+                entry["relations_totals"] = {
+                    "outgoing_total": len(out),
+                    "outgoing_shown": len(entry["outgoing_relations"]),
+                    "incoming_total": len(inc),
+                    "incoming_shown": len(entry["incoming_relations"]),
+                    "occurrences_shown": len(entry["recent_occurrences"]),
+                }
+                if len(out) > 5 or len(inc) > 5:
+                    entry["relations_note"] = (
+                        "Listado recortado a 5 por sentido. Usa cs_get_concept_graph "
+                        "para el grafo local completo."
+                    )
 
         coverage.append(entry)
 
