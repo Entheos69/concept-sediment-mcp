@@ -18,6 +18,21 @@ from db import get_session
 # VCM: Vector de Conocimiento Minimo
 # ════════════════════════════════════════════════════════════════
 
+# GEMELO CROSS-REPO ABIERTO (anotado 2026-07-14, HANDOFF de CodeCS).
+# Esta lista es una COPIA divergente de concept-sediment/graph/humandato_queries.py:
+#   - DATOS: RESINCRONIZADO 2026-07-14 (9 == 9). Faltaban aqui `name es
+#     identificador` (min_weight 2.0) y `veredicto adjudicado` (critical): nunca
+#     habian podido ladrar en cs_get_alerts porque no existian en esta lista.
+#     Resincronizar a mano NO cierra el gemelo — vuelve a driftear en cuanto
+#     alguien edite un solo lado. Es un parche al sintoma, con fecha.
+#   - LOGICA: get_missing_vaccines() de ESTE repo honra `scope` (filtra
+#     project_specific por c.projects); el de Django aun NO (matchea por name
+#     globalmente). Aqui la logica es la buena; alla los datos.
+# CONSECUENCIA, mientras el gemelo siga abierto: cs_get_alerts NO es autoridad
+# sobre las vacunas de concept-sediment. El estado real se consulta con
+# get_missing_vaccines() de aquel repo.
+# CIERRE PROPUESTO: tabla vcm_directive en el Postgres compartido (fuente unica
+# como DATO, no como codigo) -> docs/HANDOFF_CodeMCP_a_CodeCS_vcm_fuente_unica_2026-07-14.md
 VCM_DIRECTIVES = [
     # ════════════════════════════════════════════════════════════════
     # VACUNAS GLOBALES: aplican a todos los proyectos
@@ -87,6 +102,49 @@ VCM_DIRECTIVES = [
         ),
         "min_weight": 0.3,
         "failure_history": "Documentada en sistema de diseno.",
+    },
+    # Estas dos faltaban aqui (gemelo divergente, detectado 2026-07-14).
+    # Texto copiado LITERAL de concept-sediment/graph/humandato_queries.py:
+    # no re-redactar — convergen en fuente unica (tabla vcm_directive).
+    {
+        "name": "name es identificador",
+        "scope": "global",
+        "category": "concept_sediment",
+        "severity": "high",
+        "directive": (
+            "YAML de cierre: 'name' es IDENTIFICADOR corto (<=200 chars), NO "
+            "descripcion -- el detalle largo va en 'notes'. Relaciones: usar "
+            "solo tipos del enum canonico o aliases conocidos (el sistema mapea "
+            "sinonimos via RelationAlias); 'related' exige notes per-relation. "
+            "Validar con 'python manage.py lint_sessions <yaml>' ANTES de cerrar."
+        ),
+        "min_weight": 2.0,
+        "failure_history": (
+            "name>200 reventaba extract_concepts (StringDataRightTruncation): "
+            "3 YAMLs seguidos 2026-06-05/06. min_weight alto (2.0=banda protegida) "
+            "por decay acelerado no resuelto: el regano persiste hasta consolidar."
+        ),
+    },
+    {
+        "name": "veredicto adjudicado",
+        "scope": "global",
+        "category": "concept_sediment",
+        "severity": "critical",
+        "directive": (
+            "Alerta del Humandato (fracturas / aristas pending) NO se re-analiza. "
+            "El veredicto ya existe: masa critica 3/2 inalcanzable (consiliencia "
+            "cross-agente = 0), cosechar por eje-2 (gloss), y cablear alias con "
+            "repair_discards ANTES de harvest --promote (su guard es slug-exacto, "
+            "no detecta sinonimia). Leer el veredicto y EJECUTAR, no re-derivar."
+        ),
+        "min_weight": 1.0,
+        "failure_history": (
+            "5 re-derivaciones del mismo analisis con las mismas herramientas y la "
+            "misma conclusion: S74-S75 (2026-04-05), 2026-04-17, 2026-06-22, "
+            "2026-07-05, 2026-07-09. Ninguna sedimentada como principle -- las 5 "
+            "quedaron como event, decayeron a dormant, y hoy son ellas mismas parte "
+            "de las fracturas que la alerta reporta."
+        ),
     },
     # ════════════════════════════════════════════════════════════════
     # VACUNAS PROJECT-SPECIFIC: aplican solo a proyectos declarados
@@ -239,7 +297,6 @@ def get_missing_vaccines(project: Optional[str] = None) -> list[dict]:
 
         for vcm in VCM_DIRECTIVES:
             pattern = f"%{vcm['name']}%"
-            params = {"pattern": pattern}
 
             # Determinar scope (default: global para retrocompatibilidad)
             scope = vcm.get("scope", "global")
@@ -247,21 +304,40 @@ def get_missing_vaccines(project: Optional[str] = None) -> list[dict]:
             # PROJECT-SPECIFIC: verificar si aplica al proyecto consultado
             if scope == "project_specific":
                 applicable = vcm.get("applicable_projects", [])
-                if project and project not in applicable:
-                    # Skip - esta vacuna no aplica a este proyecto
-                    continue
-                # Aplicar filtro de proyecto
+
+                if project:
+                    if project not in applicable:
+                        # Skip - esta vacuna no aplica a este proyecto
+                        continue
+                    targets = [project]
+                else:
+                    # Consulta sin proyecto: evaluar contra los proyectos
+                    # aplicables de la vacuna. Pasar project=None al filtro
+                    # produce NULL = ANY(c.projects) -> NULL -> cero filas, y
+                    # TODA vacuna project_specific ladraria como faltante.
+                    if not applicable:
+                        continue
+                    targets = applicable
+
                 sql = VACCINES_CHECK_SQL.replace(
                     "WHERE c.name",
                     "WHERE :project = ANY(c.projects) AND c.name"
                 )
-                params["project"] = project
+                found = [
+                    r for r in (
+                        session.execute(
+                            text(sql), {"pattern": pattern, "project": t}
+                        ).fetchone()
+                        for t in targets
+                    ) if r
+                ]
+                row = max(found, key=lambda r: r.weight) if found else None
 
             # GLOBAL: buscar en TODO el grafo (sin filtro de proyecto)
             else:
-                sql = VACCINES_CHECK_SQL
-
-            row = session.execute(text(sql), params).fetchone()
+                row = session.execute(
+                    text(VACCINES_CHECK_SQL), {"pattern": pattern}
+                ).fetchone()
 
             # Si existe concepto con peso suficiente, no es vacuna faltante
             if row and row.weight >= vcm["min_weight"]:
