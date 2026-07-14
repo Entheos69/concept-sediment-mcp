@@ -67,10 +67,15 @@ def format_alerts(alerts: dict) -> str:
         lines.append("")
 
     if alerts["missing_vaccines"]:
-        lines.append("VACUNAS FALTANTES (directivas sin representacion):")
+        lines.append("VACUNAS FALTANTES (directivas sin cobertura suficiente):")
         for v in alerts["missing_vaccines"]:
             sev = v["severity"].upper()
             lines.append(f"  [{sev}] {v['category']}: {v['directive']}")
+            # El motivo distingue "nunca se sedimento" de "existe pero decayo":
+            # sin esta linea, el Guardian no puede saber si toca sedimentar de
+            # cero o reconsolidar. Se calculaba y no se imprimia.
+            if v.get("reason"):
+                lines.append(f"    Motivo: {v['reason']}")
             if v.get("failure_history"):
                 lines.append(f"    Historial: {v['failure_history']}")
         lines.append("")

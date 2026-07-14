@@ -118,13 +118,83 @@ def test_sin_falsos_positivos_reales():
     return ok
 
 
+def test_reason_distingue_decaido_de_ausente():
+    """El motivo debe separar 'nunca se sedimento' de 'existe pero decayo'.
+
+    Antes, ambos casos devolvian "Sin representacion en el grafo" — falso para el
+    segundo: SI hay representacion, esta dormida. Son acciones distintas
+    (sedimentar de cero vs. reconsolidar).
+
+    No escribe en BD: apunta una vacuna sintetica a un concepto que ya esta
+    dormant en el grafo, con un min_weight inalcanzable.
+    """
+    controles = [
+        # Concepto que existe y esta dormant (fractura conocida del grafo).
+        {
+            "name": "Deriva de dependencias sin pin",
+            "scope": "global",
+            "category": "ctl_decaido",
+            "severity": "high",
+            "directive": "control: concepto existente pero dormido",
+            "min_weight": 0.1,  # bajisimo: si estuviera active, no ladraria
+            "failure_history": "control",
+        },
+        # Concepto que no existe en absoluto.
+        {
+            "name": "zzz-jamas-sedimentado",
+            "scope": "global",
+            "category": "ctl_ausente",
+            "severity": "high",
+            "directive": "control: nunca sedimentado",
+            "min_weight": 0.1,
+            "failure_history": "control",
+        },
+    ]
+
+    original = hq.load_vcm_directives
+    hq.load_vcm_directives = lambda session=None: (controles, "test")
+    try:
+        por_categoria = {v["category"]: v for v in hq.get_missing_vaccines(None)}
+    finally:
+        hq.load_vcm_directives = original
+
+    ok = True
+
+    decaido = por_categoria.get("ctl_decaido")
+    if not decaido:
+        print("  [ERROR] la vacuna sobre un concepto dormant no ladro")
+        ok = False
+    elif not decaido["reason"].startswith("Representacion decaida"):
+        print(f"  [ERROR] concepto dormant reportado como: {decaido['reason']!r}")
+        ok = False
+    else:
+        print(f"  [OK] dormant -> {decaido['reason'][:72]}...")
+        print(f"       found_status={decaido['found_status']!r} "
+              f"found_weight={decaido['found_weight']}")
+
+    ausente = por_categoria.get("ctl_ausente")
+    if not ausente:
+        print("  [ERROR] la vacuna sin concepto no ladro")
+        ok = False
+    elif ausente["reason"] != "Sin representacion en el grafo":
+        print(f"  [ERROR] concepto ausente reportado como: {ausente['reason']!r}")
+        ok = False
+    else:
+        print(f"  [OK] ausente -> {ausente['reason']!r} "
+              f"(found_status={ausente['found_status']!r})")
+
+    return ok
+
+
 if __name__ == "__main__":
     print("[TEST 1] Scope de vacunas project_specific (controles)")
     r1 = test_scope_project_specific()
     print("[TEST 2] Sin falsos positivos con directivas reales")
     r2 = test_sin_falsos_positivos_reales()
+    print("[TEST 3] El motivo distingue decaido de ausente")
+    r3 = test_reason_distingue_decaido_de_ausente()
     print()
-    if r1 and r2:
+    if r1 and r2 and r3:
         print("[OK] Todos los tests pasaron")
         sys.exit(0)
     print("[ERROR] Hay tests fallidos")

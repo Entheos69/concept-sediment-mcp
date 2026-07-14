@@ -365,6 +365,22 @@ ORDER BY c.weight DESC
 LIMIT 1
 """
 
+# Una vacuna sin concepto ACTIVE puede estar en dos situaciones muy distintas:
+# nunca se sedimento, o se sedimento y DECAYO. El check exige active, asi que
+# las dos daban el mismo veredicto ("Sin representacion en el grafo") — y para
+# la segunda eso es falso: hay representacion, esta dormida. Este SQL las separa.
+VACCINES_DECAYED_SQL = """
+SELECT
+    c.name,
+    c.weight,
+    c.status
+FROM graph_concept c
+WHERE c.name ILIKE :pattern
+  AND c.status IN ('dormant', 'archived')
+ORDER BY c.weight DESC
+LIMIT 1
+"""
+
 
 def get_missing_vaccines(project: Optional[str] = None, session=None) -> list[dict]:
     """Detecta vacunas faltantes: directivas VCM sin representación suficiente.
@@ -384,6 +400,31 @@ def get_missing_vaccines(project: Optional[str] = None, session=None) -> list[di
         session = get_session()
 
     directivas, _fuente = load_vcm_directives(session=session)
+
+    def _mejor_concepto(base_sql: str, pattern: str, targets: Optional[list]):
+        """Mejor concepto (mayor weight) que matchea el patron.
+
+        targets=None -> busqueda global, sin filtro de proyecto.
+        targets=[...] -> restringe a esos proyectos (c.projects).
+        """
+        if targets is None:
+            return session.execute(
+                text(base_sql), {"pattern": pattern}
+            ).fetchone()
+
+        sql = base_sql.replace(
+            "WHERE c.name",
+            "WHERE :project = ANY(c.projects) AND c.name"
+        )
+        found = [
+            r for r in (
+                session.execute(
+                    text(sql), {"pattern": pattern, "project": t}
+                ).fetchone()
+                for t in targets
+            ) if r
+        ]
+        return max(found, key=lambda r: r.weight) if found else None
 
     try:
         missing = []
@@ -412,25 +453,11 @@ def get_missing_vaccines(project: Optional[str] = None, session=None) -> list[di
                         continue
                     targets = applicable
 
-                sql = VACCINES_CHECK_SQL.replace(
-                    "WHERE c.name",
-                    "WHERE :project = ANY(c.projects) AND c.name"
-                )
-                found = [
-                    r for r in (
-                        session.execute(
-                            text(sql), {"pattern": pattern, "project": t}
-                        ).fetchone()
-                        for t in targets
-                    ) if r
-                ]
-                row = max(found, key=lambda r: r.weight) if found else None
-
             # GLOBAL: buscar en TODO el grafo (sin filtro de proyecto)
             else:
-                row = session.execute(
-                    text(VACCINES_CHECK_SQL), {"pattern": pattern}
-                ).fetchone()
+                targets = None
+
+            row = _mejor_concepto(VACCINES_CHECK_SQL, pattern, targets)
 
             # Si existe concepto con peso suficiente, no es vacuna faltante
             if row and row.weight >= vcm["min_weight"]:
@@ -444,15 +471,36 @@ def get_missing_vaccines(project: Optional[str] = None, session=None) -> list[di
             }
 
             if row:
+                # Hay concepto activo, pero no pesa lo suficiente.
                 entry["found_concept"] = row.name
                 entry["found_weight"] = round(row.weight, 1)
+                entry["found_status"] = row.status
                 entry["reason"] = (
                     f"Peso insuficiente: {row.weight:.1f} < {vcm['min_weight']}"
                 )
             else:
-                entry["found_concept"] = None
-                entry["found_weight"] = 0.0
-                entry["reason"] = "Sin representacion en el grafo"
+                # Sin concepto ACTIVE. Antes se reportaba siempre "Sin
+                # representacion en el grafo", y para un concepto que decayo eso
+                # era FALSO: si hay representacion, esta dormida. Son dos estados
+                # distintos y piden acciones distintas — sedimentar de cero vs.
+                # reconsolidar (o revisar si el decay lo esta comiendo).
+                decayed = _mejor_concepto(VACCINES_DECAYED_SQL, pattern, targets)
+
+                if decayed:
+                    entry["found_concept"] = decayed.name
+                    entry["found_weight"] = round(decayed.weight, 1)
+                    entry["found_status"] = decayed.status
+                    entry["reason"] = (
+                        f"Representacion decaida: '{decayed.name}' esta "
+                        f"{decayed.status} (w{decayed.weight:.1f}); el check "
+                        f"exige status=active. No falta sedimentar: falta "
+                        f"reconsolidar."
+                    )
+                else:
+                    entry["found_concept"] = None
+                    entry["found_weight"] = 0.0
+                    entry["found_status"] = None
+                    entry["reason"] = "Sin representacion en el grafo"
 
             missing.append(entry)
 

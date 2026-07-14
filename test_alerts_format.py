@@ -91,6 +91,21 @@ VACUNA_CRITICAL = {
 
 SILENCIO = "Sin alertas"
 
+VACUNA_DECAIDA = {
+    "severity": "high",
+    "category": "concept_sediment",
+    "directive": "name es IDENTIFICADOR corto (<=200 chars)",
+    "failure_history": "StringDataRightTruncation",
+    "found_concept": "name es identificador <=200 (detalle en notes)",
+    "found_weight": 2.0,
+    "found_status": "dormant",
+    "reason": (
+        "Representacion decaida: 'name es identificador <=200' esta dormant "
+        "(w2.0); el check exige status=active. No falta sedimentar: falta "
+        "reconsolidar."
+    ),
+}
+
 CASOS = [
     # (titulo, alerts, debe_estar_en_salida, NO_debe_estar)
     (
@@ -98,6 +113,12 @@ CASOS = [
         _alerts(),
         [SILENCIO],
         [],
+    ),
+    (
+        "vacuna decaida: el motivo llega a la salida, y no dice 'sin representacion'",
+        _alerts(vacunas=[VACUNA_DECAIDA]),
+        ["Motivo:", "Representacion decaida", "dormant", "reconsolidar"],
+        [SILENCIO, "Sin representacion en el grafo"],
     ),
     (
         "solo vacuna HIGH (status=stable): DEBE ladrar",  # el bug
