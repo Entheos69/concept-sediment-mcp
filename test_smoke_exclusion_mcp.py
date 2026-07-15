@@ -123,13 +123,22 @@ def test_server_narrative_smoke_branch():
     print("[TEST 4] Verificando server.py incluye rama narrativa F47-D1.1...")
 
     import inspect
-    import server
 
-    src = inspect.getsource(server)
+    # La narrativa de cs_get_alerts se extrajo de server.py a alerts_format.py
+    # (2026-07-14, fix del formateador que silenciaba lo no-critico). El
+    # stable-check tambien: get_all_alerts calcula el status y format_alerts
+    # decide el silencio. Se inspeccionan ambos modulos.
+    import alerts_format
+    import humandato_queries
+    src = (
+        inspect.getsource(alerts_format)
+        + inspect.getsource(humandato_queries)
+    )
 
-    # Stable check usa total_pending_real
-    if "discards_real == 0" in src:
-        print("  [OK] stable-check usa discards_real (no total_pending puro)")
+    # Stable check ya no silencia por status: ahora solo calla si NO hay alerta
+    # de ningun tipo, e incluye discards_real en ese conteo.
+    if "discards_real" in src and "total_alertas" in src:
+        print("  [OK] silencio condicionado a total_alertas (incluye discards_real)")
     else:
         print("  [ERROR] stable-check no actualizado para F47-D1.1")
         return False

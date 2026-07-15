@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import db  # noqa: E402
 import queries  # noqa: E402
 from queries import (  # noqa: E402
     SEARCH_MODE_EMBEDDING,
@@ -30,6 +31,7 @@ from queries import (  # noqa: E402
     get_session_context_data,
     search_concepts,
 )
+from sqlalchemy import text as _sql  # noqa: E402
 
 # Query en lenguaje natural: el motor semantico la entiende, ILIKE no (busca la
 # frase literal). Es justo el caso donde el fallback mudo mentia.
@@ -37,18 +39,60 @@ QUERY_NL = "afirmacion zombi evento revision"
 CONCEPTO_CON_RELACIONES = "Deriva de dependencias sin pin"
 
 
+def _vector_de_un_concepto():
+    """Toma el embedding real de un concepto del grafo, para usarlo como query.
+
+    Asi el camino 'sano' se ejercita sin llamar a OpenAI: la busqueda semantica
+    corre de verdad (pgvector, similitudes reales) aunque el proveedor de
+    embeddings este caido/bloqueado en este entorno. Lo que probamos es la
+    FRONTERA DE ENTREGA (search_mode, truncado declarado), no el proveedor.
+    """
+    session = db.get_session()
+    try:
+        row = session.execute(_sql(
+            "SELECT embedding FROM graph_concept "
+            "WHERE embedding IS NOT NULL ORDER BY weight DESC LIMIT 1"
+        )).fetchone()
+    finally:
+        session.close()
+    if not row or row.embedding is None:
+        return None
+    emb = row.embedding
+    # pgvector puede devolverlo como str "[...]" o como lista.
+    if isinstance(emb, str):
+        return [float(x) for x in emb.strip("[]").split(",")]
+    return list(emb)
+
+
 def test_h1_degradacion_declarada():
-    """Con el embedding caido, el vacio debe venir MARCADO como degradado."""
-    sano = search_concepts(QUERY_NL, limit=3)
+    """Con el embedding caido, el vacio debe venir MARCADO como degradado.
+
+    Independiente del proveedor de embeddings: el camino sano se fuerza con un
+    vector real del grafo (monkeypatch), el degradado tumbando el generador.
+    """
+    vec = _vector_de_un_concepto()
+    if vec is None:
+        print("  [ERROR] ningun concepto con embedding en el grafo (no concluyente)")
+        return False
+
+    original = queries._generate_query_embedding
+
+    # Camino SANO: el generador devuelve un vector valido -> corre pgvector.
+    queries._generate_query_embedding = lambda t: vec
+    try:
+        sano = search_concepts(QUERY_NL, limit=3)
+    finally:
+        queries._generate_query_embedding = original
+
     if sano["search_mode"] != SEARCH_MODE_EMBEDDING or sano["count"] == 0:
-        print(f"  [ERROR] el motor semantico no respondio: {sano['search_mode']}, "
-              f"{sano['count']} hits (test no concluyente)")
+        print(f"  [ERROR] camino sano no dio modo embedding: {sano['search_mode']}, "
+              f"{sano['count']} hits")
         return False
     print(f"  [OK] sano: mode={sano['search_mode']} degraded={sano['degraded']} "
           f"count={sano['count']}")
 
-    original = queries._generate_query_embedding
-    queries._generate_query_embedding = lambda t: None  # proveedor caido
+    # Camino DEGRADADO: el generador falla (None) -> ILIKE, marcado.
+    queries._generate_query_embedding = lambda t: None
     try:
         roto = search_concepts(QUERY_NL, limit=3)
     finally:
@@ -119,8 +163,23 @@ def test_h3_ranking_no_mezcla_escalas():
 
 
 def test_h5_truncado_declarado():
-    """Toda description recortada debe venir marcada."""
-    res = search_concepts(QUERY_NL, limit=5)
+    """Toda description recortada debe venir marcada.
+
+    Se fuerza el camino embedding con un vector real (independiente del proveedor)
+    para obtener un lote de conceptos con descriptions largas.
+    """
+    vec = _vector_de_un_concepto()
+    if vec is None:
+        print("  [ERROR] ningun concepto con embedding (no concluyente)")
+        return False
+
+    original = queries._generate_query_embedding
+    queries._generate_query_embedding = lambda t: vec
+    try:
+        res = search_concepts(QUERY_NL, limit=5)
+    finally:
+        queries._generate_query_embedding = original
+
     concepts = res["concepts"]
     if not concepts:
         print("  [ERROR] sin resultados (test no concluyente)")
