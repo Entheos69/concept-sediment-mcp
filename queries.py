@@ -39,6 +39,113 @@ def _desc(raw: str, limit: int = DESC_MAX) -> tuple[str, bool]:
         return text_, False
     return text_[:limit].rstrip() + "...", True
 
+# ════════════════════════════════════════════════════════════════
+# Impugnaciones: el nodo corregido no puede servirse como incolume
+# ════════════════════════════════════════════════════════════════
+# HANDOFF CodeCS->CodeMCP (2026-07-16). La `description` de un nodo sale SOLO
+# del YAML que lo DECLARA; la enmienda de quien lo corrige vive en la ARISTA.
+# Como ninguna de las dos busquedas tocaba graph_conceptrelation, un nodo con
+# `contradicts` entrante se servia sin una sola senal de estar impugnado — y en
+# el caso que origino esto, la description servida era literalmente falsa.
+#
+# NO es la forma "el dato correcto se calcula y se tira" (auditoria 2026-07-14):
+# aqui el dato NUNCA se calculaba. Remedio opuesto: no es dejar de tirar, es
+# empezar a preguntar.
+#
+# Medicion in-vivo (2026-07-16, 672 conceptos servidos, 2394 relaciones):
+#   21 aristas impugnantes -> 11 nodos servidos impugnados -> 5 con retador VIVO.
+#   16 de las 21 vienen de un retador `archived`. Por eso NO colapsamos: una
+#   bandera cruda marcaria 11 nodos con 6 disputas muertas dentro (55% ruido).
+CHALLENGE_RELATIONS = ("contradicts", "supersedes")
+
+_CONTESTED_NOTE_ACTIVE = (
+    "Este concepto tiene impugnaciones ENTRANTES de conceptos vigentes. NO "
+    "significa que sea falso: significa que hay DISPUTA, y la enmienda vive en "
+    "la arista, no en esta description. El impugnante tambien podria ser el "
+    "equivocado. Pide cs_get_concept_graph(<name>) y leela antes de citarlo."
+)
+_CONTESTED_NOTE_ARCHIVED = (
+    "Impugnado solo por conceptos 'archived'. La disputa pudo haberse RESUELTO "
+    "o pudo simplemente haber DECAIDO por desuso: el grafo no distingue esos "
+    "dos casos. Menor prioridad, no nula."
+)
+_CONTESTED_NOTE_ERROR = (
+    "La ausencia de bandera NO es evidencia de que no haya disputa: la "
+    "verificacion de impugnaciones NO PUDO EJECUTARSE. Si el concepto importa, "
+    "pide cs_get_concept_graph(<name>) y mira sus relaciones entrantes."
+)
+
+
+def _fetch_contested(session, concept_ids: list) -> dict | None:
+    """Retadores por concepto: UNA query agregada por lote, no una por nodo.
+
+    OJO: `None` NO significa "sin impugnaciones", significa "no pude preguntar".
+    Quien llame debe PROPAGAR esa distincion — es el mismo error que H1
+    (auditoria 2026-07-14): devolver vacio ante un fallo convierte una caida de
+    infraestructura en un "esta limpio".
+
+    Returns:
+        {target_id: (nombres_retadores_vivos, cuenta_retadores_archived)},
+        o None si la consulta fallo.
+    """
+    if not concept_ids:
+        return {}
+    try:
+        rows = session.execute(text("""
+            SELECT r.target_id,
+                   ARRAY_AGG(s.name || ' [' || r.relation_type || ']')
+                       FILTER (WHERE s.status != 'archived') AS vivos,
+                   COUNT(*) FILTER (WHERE s.status = 'archived') AS archivados
+            FROM graph_conceptrelation r
+            JOIN graph_concept s ON s.id = r.source_id
+            WHERE r.target_id = ANY(:ids)
+              AND r.relation_type = ANY(:tipos)
+            GROUP BY r.target_id
+        """), {
+            "ids": list(concept_ids),
+            "tipos": list(CHALLENGE_RELATIONS),
+        }).fetchall()
+    except Exception as e:
+        logger.error("[CONTESTED] no se pudo verificar impugnaciones: %s", e)
+        return None
+    return {r.target_id: (r.vivos or [], r.archivados or 0) for r in rows}
+
+
+def _contested_payload(vivos: list, archivados: int) -> dict:
+    """Paquete por concepto. La nota informa, NO adjudica quien tiene razon."""
+    return {
+        "by_active": vivos,
+        "by_archived": archivados,
+        "note": _CONTESTED_NOTE_ACTIVE if vivos else _CONTESTED_NOTE_ARCHIVED,
+    }
+
+
+def _annotate_contested(session, ids: list, results: list) -> None:
+    """Anade `contested` a cada result (in-place). Contrato de TRES valores:
+
+        False        -> se pregunto y esta limpio
+        {by_active..}-> se pregunto y hay disputa
+        {error: ...} -> NO se pudo preguntar
+
+    Nunca None/null: un consumidor LLM lee null como "no". El caso de fallo
+    tiene que ser ruidoso, no falsy — si no, reintroduce el bug que este mismo
+    campo existe para cerrar.
+    """
+    mapa = _fetch_contested(session, ids)
+
+    if mapa is None:
+        for r in results:
+            r["contested"] = {
+                "error": "no se pudo verificar impugnaciones entrantes",
+                "note": _CONTESTED_NOTE_ERROR,
+            }
+        return
+
+    for cid, r in zip(ids, results):
+        entry = mapa.get(cid)
+        r["contested"] = _contested_payload(*entry) if entry else False
+
+
 # ── Embeddings (para búsqueda semántica) ──
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
@@ -209,6 +316,7 @@ def _search_by_embedding_vec(embedding: list, domain: str = None,
     try:
         rows = session.execute(text(sql), params).fetchall()
         results = []
+        ids = []
         for row in rows:
             desc, truncated = _desc(row.description)
             r = {
@@ -224,6 +332,8 @@ def _search_by_embedding_vec(embedding: list, domain: str = None,
                 "projects": row.projects or [],
             }
             results.append(r)
+            ids.append(row.id)
+        _annotate_contested(session, ids, results)
         return results
     except Exception as e:
         logger.error("Embedding search failed: %s", e)
@@ -266,6 +376,7 @@ def search_concepts_by_text(query: str, domain: str = None,
     try:
         rows = session.execute(text(sql), params).fetchall()
         results = []
+        ids = []
         for row in rows:
             desc, truncated = _desc(row.description)
             results.append({
@@ -283,6 +394,8 @@ def search_concepts_by_text(query: str, domain: str = None,
                 "domains": row.domains_list or [],
                 "projects": row.projects or [],
             })
+            ids.append(row.id)
+        _annotate_contested(session, ids, results)
         return results
     except Exception as e:
         logger.error("Text search failed: %s", e)
@@ -653,6 +766,18 @@ def get_session_context_data(project: str = None, domains: list = None,
         # el agente que abre sesion creia estar viendo su dominio entero.
         posible_recorte = len(rows) == limit
 
+        # Impugnaciones (HANDOFF 2026-07-16). Este tool lo lee TODO agente al
+        # abrir sesion: es el canal de consumo mas ancho del grafo, mas que la
+        # busqueda. Servir aqui un nodo corregido como incolume es peor.
+        contested = _fetch_contested(session, [r.id for r in rows])
+
+        def _flag(row_id):
+            if contested is None:
+                return {"error": "no se pudo verificar impugnaciones entrantes",
+                        "note": _CONTESTED_NOTE_ERROR}
+            entry = contested.get(row_id)
+            return _contested_payload(*entry) if entry else False
+
         if output_format == "json":
             concepts = []
             for row in rows:
@@ -664,6 +789,7 @@ def get_session_context_data(project: str = None, domains: list = None,
                     "description_truncated": truncated,
                     "weight": round(row.weight, 1),
                     "domains": row.domains_list or [],
+                    "contested": _flag(row.id),
                 })
             return json.dumps({
                 "total": len(concepts),
@@ -682,6 +808,10 @@ def get_session_context_data(project: str = None, domains: list = None,
         if posible_recorte:
             lines.append(f"# [AVISO] Se alcanzo el limite ({limit}): puede haber "
                           f"MAS conceptos sin mostrar. Esto no es el dominio completo.")
+        if contested is None:
+            lines.append("# [AVISO] No se pudo verificar impugnaciones entrantes. "
+                          "NINGUN concepto de abajo esta marcado como impugnado, y eso "
+                          "NO es evidencia de que no lo este.")
         lines.append("")
 
         current_type = None
@@ -706,6 +836,16 @@ def get_session_context_data(project: str = None, domains: list = None,
             lines.append(f"- **{row.name}**: {desc}")
             lines.append(f"  Dominios: {doms or 'sin dominio'} | "
                           f"Weight: {row.weight:.1f}")
+
+            flag = _flag(row.id)
+            if isinstance(flag, dict) and flag.get("by_active"):
+                lines.append(f"  [IMPUGNADO] por: {'; '.join(flag['by_active'])}")
+                lines.append(f"  [IMPUGNADO] la enmienda vive en la arista, NO en la "
+                              f"description de arriba. Pide "
+                              f"cs_get_concept_graph(\"{row.name[:60]}\") antes de citarlo.")
+            elif isinstance(flag, dict) and flag.get("by_archived"):
+                lines.append(f"  [impugnado] por {flag['by_archived']} concepto(s) "
+                              f"archived: la disputa pudo resolverse o solo decaer.")
 
         lines.append("")
         return "\n".join(lines)

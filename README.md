@@ -78,6 +78,39 @@ Diseñado para proveer memoria semántica persistente a agentes AI (Claude Code,
 
 ## 🔧 MCP Tools disponibles
 
+### El campo `contested` (fuente única — lo sirven `cs_search_concepts`, `cs_session_open` y `cs_get_session_context`)
+
+La `description` de un concepto sale **solo del YAML que lo declara**. Cuando otro
+concepto lo corrige, la enmienda vive en la **arista** (`contradicts` / `supersedes`),
+no en el nodo. Quien navega el grafo (`cs_get_concept_graph`) la ve; quien **busca**
+no la veía — y recibía la description impugnada como si estuviera incólume.
+
+`contested` cierra ese hueco. Tiene **tres valores, nunca `null`**:
+
+| Valor | Significa |
+|---|---|
+| `false` | Se preguntó: no hay impugnaciones entrantes. |
+| `{"by_active": [...], "by_archived": N, "note": "..."}` | Se preguntó: hay disputa. |
+| `{"error": "...", "note": "..."}` | **No se pudo preguntar.** La ausencia de bandera no es evidencia de nada. |
+
+- **No adjudica.** Dice que hay disputa, nunca quién tiene razón: el impugnante
+  también podría ser el equivocado. Para leerla: `cs_get_concept_graph(<name>)`.
+- **`by_active` vs `by_archived` no se colapsan.** Un retador `archived` puede
+  significar que la disputa se resolvió *o* que solo decayó por desuso — el grafo
+  no distingue esos casos, así que el consumidor decide. En la medición del
+  2026-07-16, 16 de 21 aristas impugnantes venían de un retador archived: colapsarlas
+  habría marcado 11 nodos con 6 disputas muertas dentro.
+- **Nunca es falsy en el caso de fallo**, a propósito: un consumidor LLM lee `null`
+  como "no". El fallo tiene que ser ruidoso o reintroduce el bug que este campo cierra.
+- **Costo:** una query agregada **por lote** (~1 round-trip), no una por nodo, y nunca
+  el subgrafo. El throughput de la búsqueda no se toca.
+
+En el formato `markdown` de `cs_get_session_context` esto se rinde como `[IMPUGNADO] por: ...`
+bajo el concepto; si la verificación falla, un `[AVISO]` en el encabezado lo declara
+para todo el lote.
+
+---
+
 ### 1. `cs_search_concepts`
 Búsqueda semántica por embeddings (OpenAI `text-embedding-3-small`).
 
@@ -88,6 +121,7 @@ Búsqueda semántica por embeddings (OpenAI `text-embedding-3-small`).
 - `limit` (int, default=10): Máximo de resultados
 
 **Retorna:** Conceptos ordenados por similaridad semántica (threshold >= 0.3).
+Cada uno incluye `contested` (ver arriba).
 
 ---
 
@@ -101,6 +135,7 @@ Contexto filtrado para iniciar una sesión de trabajo.
 - `format` (string, default="markdown"): `markdown` o `json`
 
 **Retorna:** Conceptos activos priorizados por tipo (principles > patterns > events) y weight.
+Cada uno incluye `contested` (ver arriba).
 
 **Optimización clave:** Filtrando por dominios, reduce tokens de ~13.6k (todo el grafo) a ~3-5k (solo relevante).
 
