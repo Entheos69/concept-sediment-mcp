@@ -514,6 +514,67 @@ def get_missing_vaccines(project: Optional[str] = None, session=None) -> list[di
 
 
 # ════════════════════════════════════════════════════════════════
+# CONCEPTOS SIN DOMINIOS: activos que no decaen (deuda de higiene) — V3
+# ════════════════════════════════════════════════════════════════
+
+# canonical def: HANDOFF CodeCS 2026-09-16 §1, no driftear.
+# "Sin dominios" = SIN ninguna fila en graph_concept_domains (no es "dominio
+# faltante": esos se auto-crean). La AUTORIDAD de la definicion es CodeCS
+# (graph/management/commands/domain_health.py); este SQL es su espejo puro.
+# Un concepto sin dominios NO decae nunca -> se acumula en silencio.
+NO_DOMAINS_SQL = """
+SELECT
+    c.id, c.name, c.type, c.status, c.weight, c.last_seen_at
+FROM graph_concept c
+LEFT JOIN graph_concept_domains cd ON cd.concept_id = c.id
+WHERE cd.concept_id IS NULL
+  AND c.status = 'active'
+ORDER BY c.weight DESC, c.name
+"""
+
+
+def get_concepts_no_domains(project: Optional[str] = None) -> list[dict]:
+    """Conceptos activos sin ningun dominio (V3, HANDOFF CodeCS 2026-09-16).
+
+    Shape de salida = SSoT del contrato (zero_domain_concepts de
+    `domain_health --json`): lista de {id, name, type, status, weight,
+    last_seen}. Si cambia el shape, se coordina con CodeCS (anti-gemelo).
+
+    project=None -> barrido completo sin filtro (consistente con el resto de
+    alertas). project="x" -> agrega `:project = ANY(c.projects)`, mismo patron
+    que get_fractures.
+    """
+    session = get_session()
+    try:
+        sql = NO_DOMAINS_SQL
+        params = {}
+        if project:
+            sql = sql.replace(
+                "WHERE cd.concept_id IS NULL",
+                "WHERE cd.concept_id IS NULL AND :project = ANY(c.projects)",
+            )
+            params["project"] = project
+
+        rows = session.execute(text(sql), params).fetchall()
+        return [
+            {
+                "id": str(r.id),
+                "name": r.name,
+                "type": r.type,
+                "status": r.status,
+                "weight": round(r.weight, 1),
+                "last_seen": (
+                    r.last_seen_at.strftime("%Y-%m-%d")
+                    if r.last_seen_at else None
+                ),
+            }
+            for r in rows
+        ]
+    finally:
+        session.close()
+
+
+# ════════════════════════════════════════════════════════════════
 # FUNCIÓN PRINCIPAL: get_all_alerts
 # ════════════════════════════════════════════════════════════════
 
@@ -620,6 +681,7 @@ def get_all_alerts(project: Optional[str] = None) -> dict:
     fractures_raw = get_fractures(project)
     vaccines = get_missing_vaccines(project)
     discards = get_discards_summary(project)
+    no_domains = get_concepts_no_domains(project)  # V3
 
     # Clasificar fracturas por severidad y filtrar reparadas
     criticas = []
@@ -672,12 +734,14 @@ def get_all_alerts(project: Optional[str] = None) -> dict:
         },
         "missing_vaccines": vaccines,
         "relation_discards": discards,  # C2d extension
+        "concepts_no_domains": no_domains,  # V3: lista (SSoT domain_health)
         "summary": {
             "fractures_count": total_fractures,
             "fractures_criticas": len(criticas),
             "fractures_moderadas": len(moderadas),
             "fractures_bajas": len(bajas),
             "missing_vaccines_count": len(vaccines),
+            "concepts_no_domains_count": len(no_domains),  # V3
             "critical_alerts": critical_alerts,
             "status": status,
         },

@@ -21,8 +21,14 @@ import sys
 from alerts_format import format_alerts
 
 
-def _alerts(criticas=0, moderadas=0, vacunas=None, discards_real=0):
-    """Construye un payload de get_all_alerts() sintetico."""
+def _alerts(criticas=0, moderadas=0, vacunas=None, discards_real=0,
+            sin_dominios=None):
+    """Construye un payload de get_all_alerts() sintetico.
+
+    sin_dominios: None -> la clave 'concepts_no_domains' NO se incluye (prueba
+        el camino defensivo .get() cuando la clave falta). int -> la clave se
+        incluye como LISTA de ese largo (shape canonico, HANDOFF CodeCS §2).
+    """
     vacunas = vacunas or []
 
     def _fractura(nombre):
@@ -42,7 +48,7 @@ def _alerts(criticas=0, moderadas=0, vacunas=None, discards_real=0):
     # Replica la logica de get_all_alerts(): stable si no hay NADA critico.
     status = "stable" if critical_alerts == 0 else "vulnerable"
 
-    return {
+    payload = {
         "fractures": {
             "criticas": lista_criticas,
             "moderadas": lista_moderadas,
@@ -68,6 +74,23 @@ def _alerts(criticas=0, moderadas=0, vacunas=None, discards_real=0):
             "status": status,
         },
     }
+
+    if sin_dominios is not None:
+        # LISTA canonica (HANDOFF CodeCS §2), ordenada por weight DESC. El
+        # formateador calcula total=len y top=[:N] de su lado.
+        payload["concepts_no_domains"] = [
+            {
+                "id": f"uuid-{i}",
+                "name": f"concepto-sin-dom-{i}",
+                "type": "event",
+                "status": "active",
+                "weight": round(2.0 - i * 0.1, 1),
+                "last_seen": "2026-09-10",
+            }
+            for i in range(sin_dominios)
+        ]
+
+    return payload
 
 
 VACUNA_HIGH = {
@@ -142,6 +165,50 @@ CASOS = [
         "criticas + no criticas: encabezado cuenta ambas",
         _alerts(criticas=2, moderadas=1, vacunas=[VACUNA_CRITICAL, VACUNA_HIGH]),
         ["3 alerta(s) critica(s)", "2 no critica(s)", "[CRITICA]", "[HIGH]"],
+        [SILENCIO],
+    ),
+    # ---- V3: conceptos activos sin dominios (SOL Estratega 2026-09-16) ----
+    (
+        "solo sin-dominios (todo lo demas limpio): DEBE ladrar, no callar",  # el bug V3
+        _alerts(sin_dominios=7),
+        ["CONCEPTOS SIN DOMINIOS", "Total: 7", "no decae", "Asignar dominio"],
+        [SILENCIO],
+    ),
+    (
+        "sin-dominios: el top se renderiza con nombre, estado y peso",
+        _alerts(sin_dominios=3),
+        ["Top 3 por peso", "concepto-sin-dom-0", "[active]", "w2.0",
+         "visto 2026-09-10"],
+        [SILENCIO],
+    ),
+    (
+        "sin-dominios: top se limita a 5 aunque haya mas (total dice la verdad)",
+        _alerts(sin_dominios=27),  # el diagnostico real del handoff
+        ["Total: 27", "Top 5 por peso", "concepto-sin-dom-4"],
+        [SILENCIO, "concepto-sin-dom-5"],  # el 6o no aparece en el top
+    ),
+    (
+        "sin-dominios cuenta como NO critica en el encabezado",
+        _alerts(criticas=1, vacunas=[VACUNA_CRITICAL], sin_dominios=4),
+        ["2 alerta(s) critica(s)", "4 no critica(s)", "CONCEPTOS SIN DOMINIOS"],
+        [SILENCIO],
+    ),
+    (
+        "clave presente con total 0: NO se imprime la seccion",
+        _alerts(sin_dominios=0),
+        [SILENCIO],  # nada mas vivo -> silencio legitimo
+        ["CONCEPTOS SIN DOMINIOS"],
+    ),
+    (
+        "clave ausente (transicion pre-contrato): no rompe, silencio legitimo",
+        _alerts(),  # sin la clave concepts_no_domains
+        [SILENCIO],
+        ["CONCEPTOS SIN DOMINIOS"],
+    ),
+    (
+        "sin-dominios NO cambia status a critico: convive con vacuna HIGH no critica",
+        _alerts(vacunas=[VACUNA_HIGH], sin_dominios=5),
+        ["0 alerta(s) critica(s)", "CONCEPTOS SIN DOMINIOS", "VACUNAS FALTANTES"],
         [SILENCIO],
     ),
 ]

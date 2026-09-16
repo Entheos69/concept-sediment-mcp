@@ -29,16 +29,35 @@ def format_alerts(alerts: dict) -> str:
     discards_real = discards.get("total_pending", 0)
     discards_real = discards.get("total_pending_real", discards_real)
 
+    # V3 (SOL Estratega 2026-09-16): conceptos activos sin dominios. Un concepto
+    # sin dominios NO decae nunca (graph/models.py) -> deuda de higiene durable.
+    # CONTRATO consumido (SSoT = CodeCS, HANDOFF 2026-09-16 §2): es una LISTA,
+    # mismo shape que zero_domain_concepts de `domain_health --json`:
+    #   alerts["concepts_no_domains"] = [
+    #       {"id", "name", "type", "status", "weight", "last_seen"}, ...
+    #   ]  (ya ordenada por weight DESC, name)
+    # total y top (N mas pesados) son AGREGACION de presentacion -> se calculan
+    # aqui, no en get_all_alerts, para no divergir del shape SSoT (anti-gemelo).
+    # Se lee con .get(): si la clave falta (transicion), la seccion no se imprime
+    # y produccion queda intacta. No inventamos aqui la definicion de "sin
+    # dominios": es de CodeCS.
+    no_domains = alerts.get("concepts_no_domains") or []
+    no_domains_total = len(no_domains)
+    NO_DOMAINS_TOP_N = 5
+
     # El silencio solo es legitimo si NO hay alerta de NINGUN tipo.
     # BUG (2026-07-14): el early-return se disparaba con status == "stable", y
     # status solo mira criticas (critical_alerts = fracturas criticas + vacunas
     # severity=critical). Efecto: fracturas moderadas/bajas y vacunas high/medium
     # se calculaban y se tiraban sin imprimir -> "Sin alertas" con alertas vivas.
     # Mismo linaje que el gemelo VCM: el instrumento mide bien y se calla.
+    # V3: conceptos-sin-dominios entra al conteo por la MISMA razon; si no,
+    # nace muda -> "Sin alertas" con deuda viva (reabre el bug documentado).
     total_alertas = (
         alerts["fractures"]["total"]
         + len(alerts["missing_vaccines"])
         + discards_real
+        + no_domains_total
     )
     if total_alertas == 0:
         return "Humandato: sistema inmunologico estable. Sin alertas."
@@ -121,6 +140,34 @@ def format_alerts(alerts: dict) -> str:
                 f"{discards['types_meeting_promo_rule']} tipo(s)"
             )
 
+        lines.append("")
+
+    # V3: conceptos activos sin dominios (SOL Estratega 2026-09-16).
+    # "Solo informa" (no cambia status): es deuda de higiene, no fractura
+    # inmunologica critica. Pero SI se imprime (ver total_alertas arriba).
+    if no_domains_total > 0:
+        lines.append(
+            "CONCEPTOS SIN DOMINIOS (activos, no decaen -- deuda de higiene):"
+        )
+        lines.append(f"  Total: {no_domains_total}")
+        top = no_domains[:NO_DOMAINS_TOP_N]
+        if top:
+            lines.append(f"  Top {len(top)} por peso:")
+            for c in top:
+                nombre = c.get("name", "?")
+                estado = c.get("status", "?")
+                peso = c.get("weight")
+                visto = c.get("last_seen")
+                detalle = f" [{estado}]"
+                if peso is not None:
+                    detalle += f" w{peso}"
+                if visto:
+                    detalle += f" (visto {visto})"
+                lines.append(f"    - {nombre}{detalle}")
+        lines.append(
+            "  [INFO] Sin dominios = el concepto no decae nunca. "
+            "Asignar dominio o archivar."
+        )
         lines.append("")
 
     return "\n".join(lines)
