@@ -1,5 +1,18 @@
 # Concept-sediments — Directivas de Sesión
 
+## Encabezado de identidad (episteme-minimo, dir. 15)
+
+Todo mensaje al Guardian empieza con una linea:
+
+    Guardian > CodeMCP @<carpeta> HH:MM-06:00
+
+- `<carpeta>`: nombre base de `pwd`, medido en ese turno.
+- Hora, medida en ese turno con la forma portable (en Git Bash de Windows `TZ=America/Mexico_City` falla sin avisar y da UTC):
+  `t=$(TZ=America/Mexico_City date +%H:%M%:z); [ "${t#*-}" = "06:00" ] || t=$(date +%H:%M%:z); echo "$t"`
+  Nunca copiar la del mensaje anterior.
+- Solo en chat. Nunca en archivos, commits, PR, YAML, SOL/HANDOFF ni codigo.
+- Canon: `docs_inducop/organizacion/SKILL_minimo.md`, directiva 15.
+
 ## Gates obligatorios (verificar ANTES de actuar)
 
 ### G1: Confirmar archivo antes de editar
