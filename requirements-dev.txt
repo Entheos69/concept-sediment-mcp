@@ -1,0 +1,7 @@
+# Concept Sediment MCP Server -- dependencias de desarrollo (no runtime).
+# Runtime vive en requirements.txt; esto solo se instala en el venv para correr la suite.
+#   venv/Scripts/python -m pip install -r requirements-dev.txt
+-r requirements.txt
+
+pytest==9.1.1
+pytest-timeout==2.4.0     # habilita --timeout=30 (patron de la G2)

@@ -48,10 +48,20 @@ Razón: Migraciones destructivas son irreversibles en producción (PostgreSQL Ra
 
 ## Restricciones ambientales
 
-- Entorno virtual: `source C:/Users/ajmon/env/Scripts/activate`
+- Entorno virtual: ver "Entorno virtual (regla F77)" abajo (fuente única).
 - `staticfiles/` NO se commitea
 - NO usar emojis en print()/logger (encoding Windows)
 - Extensiones siempre minúsculas (.html, .css, .js)
+
+## Entorno virtual (regla F77)
+
+- Mi entorno: `source C:/Users/ajmon/proyectos/concept-sediment-mcp/venv/Scripts/activate`
+- NO crear, mover ni borrar entornos virtuales sin autorización del Guardian (dir. 5).
+  Un venv no es reubicable: moverlo lo rompe; se recrea, no se mueve.
+- Python real en Windows: `C:/Python314/python`. `python3` es el alias de la Microsoft Store: no usarlo.
+- Si tras activar, `which python` no apunta a mi entorno: parar y avisar al Guardian.
+- Deps de dev (para correr la suite) en `requirements-dev.txt`, NO en `requirements.txt` (runtime):
+  `venv/Scripts/python -m pip install -r requirements-dev.txt` (trae pytest + pytest-timeout para `--timeout=30`).
 
 ## Señal del Guardian
 
