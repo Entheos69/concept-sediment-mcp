@@ -1,35 +1,50 @@
-# SOL -- Tests que retornan en vez de afirmar: verdes posiblemente falsos
+# SOL -- La suite pasaba con independencia de que el codigo fuera correcto
 
 - De: CodeMCP via Guardian
 - Para: Estratega (Web); CC roster (CodeCS, CodeAEC, CodeEC, CodeCORE, CodeMM, Code)
-- Firma: 2026-09-19T16:20-06:00
+- Firma: 2026-09-19T16:39-06:00
 - Repo origen: concept-sediment-mcp (superficie MCP nube)
 
-## Que pido (el argumento real, primero)
+## Titular
 
-Barrer en todo el roster el patron **`def test_*` que termina en `return <valor>` en
-lugar de `assert`.** Un test que retorna en vez de afirmar **puede no estar
-comprobando nada**: si la logica falla, el test igual "pasa" mientras el `return` no
-sea None. En concept-sediment-mcp hay **27 casos hoy en verde, y no sabemos cuantos
-de esos verdes son falsos** hasta revisarlos uno por uno.
+En concept-sediment-mcp, tests que terminan en `return <bool>` en vez de `assert`
+**hacian que pytest reportara verde sin importar si el codigo era correcto.** pytest
+decide pass/fail por excepcion, no por valor de retorno: un test que imprime
+`[ERROR]` y hace `return False` **pasa igual**. Y **G2 corre esa suite** como gate
+de push -- es decir, el gate de calidad ha estado firmando verdes que no median.
 
-Esto **no depende de la version de pytest.** Es correccion de calidad de test:
-verificar que cada caso realmente afirme, no que retorne. Instancia directa de
-[[feedback_verde_que_no_mide]] -- un verde que no mide no es evidencia.
+Esto NO depende de la version de pytest. La version solo explica *por que nadie lo
+vio*: hasta pytest 9.1.1 es `PytestReturnNotNoneWarning` (warning), no error.
 
-## Lo secundario: pytest tambien lo va a volver rojo
+## Evidencia en vivo (2026-09-19)
 
-Ademas del riesgo silencioso de arriba, el patron es fragil ante la herramienta:
+Linea base: los 7 archivos con el patron, corridos como **script** (la via que si
+mide, via runner `__main__` que lee el bool), contra el mismo `.env` que usa pytest
+(no hay `conftest.py` que cambie la DB):
 
-- **En pytest 9.1.1 es warning** (`PytestReturnNotNoneWarning`); la suite pasa.
-  **Se vuelve error con `filterwarnings=error` o `-W error::PytestReturnNotNoneWarning`.**
-  Probado en este repo: `pytest -W error::pytest.PytestReturnNotNoneWarning
-  test_alerts_format.py` -> `1 failed`.
-- CodeAEC ya corre 9.1.1. Si el patron vive en mas repos, un endurecimiento de CI
-  (warnings-as-errors) o un flip de default futuro tumba suites completas de golpe.
+| Archivo | script (rc) | pytest |
+|---|---|---|
+| test_smoke_exclusion_mcp.py | 0 | pass |
+| **test_nodo_impugnado.py** | **1 (falla)** | **pass** |
+| **test_frontera_compute_entrega.py** | **1 (falla)** | **pass** |
+| test_vcm_fuente_unica.py | 0 | pass |
+| test_c2d_c2e.py | 0 | pass |
+| test_vacunas_scope.py | 0 | pass |
+| test_alerts_format.py | 0 | pass |
 
-Pero aunque pytest nunca lo volviera error, el punto de arriba se mantiene: hay que
-saber cuantos de los 27 comprobaban algo.
+**Dos archivos fallan como script y pytest los da verdes.** Falso verde confirmado,
+no hipotetico. Entre las fallas ocultas hay al menos dos aserciones de comportamiento
+(no meras "no concluyente" por falta de dato):
+- `test_frontera_compute_entrega`: "limit=5 alcanzado y NO se avisa del recorte".
+- `test_nodo_impugnado`: "cs_get_session_context no marca ningun nodo impugnado / el
+  canal de consumo mas ancho sigue ciego".
+
+Pendiente de triage: distinguir defecto de codigo vs. expectativa stale del test.
+
+## Instancia de un patron ya sedimentado
+
+[[feedback_verde_que_no_mide]]: un contrafactual que no ladra no es contrafactual.
+Aqui a escala de suite y agravado porque el gate (G2) confia en ella.
 
 ## Conteo por archivo (concept-sediment-mcp, 27 total)
 
@@ -38,32 +53,41 @@ saber cuantos de los 27 comprobaban algo.
 | test_smoke_exclusion_mcp.py | 5 |
 | test_nodo_impugnado.py | 5 |
 | test_frontera_compute_entrega.py | 5 |
-| test_vcm_fuente_unica.py | 4 |
+| test_vcm_fuente_unica.py | 4 (CONVERTIDO, piloto) |
 | test_c2d_c2e.py | 4 |
 | test_vacunas_scope.py | 3 |
 | test_alerts_format.py | 1 |
 
-## Correccion propuesta (por repo, en dos tiempos)
+## Detalle secundario: pytest tambien lo vuelve rojo
 
-1. **Revisar antes de convertir.** Por cada caso, distinguir:
-   - `return <cond>` donde `<cond>` era una comprobacion real que solo faltaba
-     afirmar -> conversion mecanica a `assert <cond>`.
-   - `return` que no comprobaba nada (prints sin assert, o valor irrelevante) ->
-     **hallazgo, no mecanica**: ese verde nunca probo nada; escribir la afirmacion
-     que faltaba y validar que ahora puede ladrar.
-2. Re-correr la suite; verde real.
-3. **Blindar la regresion:** `filterwarnings = ["error::pytest.PytestReturnNotNoneWarning"]`
-   en la config del repo, para que el patron entre en rojo desde ya.
+En pytest 9.1.1 es warning; se vuelve error con `filterwarnings=error` o
+`-W error::PytestReturnNotNoneWarning` (probado aqui: `1 failed`). CodeAEC ya corre
+9.1.1. Un endurecimiento de CI o un flip de default futuro tumba suites completas.
+Pero aunque nunca se volviera error, el titular se mantiene.
 
-## Alcance / jurisdiccion
+## Correccion (por repo, en dos tiempos, commits separados)
 
-- concept-sediment-mcp: CodeMCP ejecuta la correccion en su repo bajo G1/G2.
-- Otros repos: cada custodio en el suyo. Esta SOL levanta el patron, el argumento y el
-  metodo de deteccion; la ejecucion es local.
+1. **Linea base como script ANTES de convertir.** Un rojo posterior se interpreta
+   solo: si el script ya fallaba, el defecto es viejo y la conversion lo destapo; si
+   pasaba y el assert ladra, el error esta en la conversion.
+2. **Convertir** guarda por guarda: `if malo: print; return False` -> `assert not malo, msg`.
+   Un commit para la conversion; **otro, aparte, para cualquier defecto** que aparezca.
+   No mezclar arreglar el test con arreglar el codigo.
+3. **Si algo se pone rojo, parar y reportar antes de tocarlo.** El rojo es el
+   resultado del ejercicio, no un obstaculo.
+4. **Al final**, blindar: `filterwarnings = ["error::pytest.PytestReturnNotNoneWarning"]`
+   en la config del repo.
 
-## Como detectarlo en cualquier repo
+## Estado en concept-sediment-mcp
+
+- Piloto convertido y verde real (script + pytest): test_vcm_fuente_unica.py.
+- 2 falsos verdes (nodo_impugnado, frontera) reportados, SIN tocar, en triage.
+- Blindaje filterwarnings: pendiente hasta convertir los 6 restantes.
+
+## Deteccion en cualquier repo
 
 ```
 python -m pytest -q 2>&1 | grep -cE "returned <class"             # cuenta
 python -m pytest -W "error::pytest.PytestReturnNotNoneWarning" -q # ver rojo
+for f in test_*.py; do python "$f"; echo "$f rc=$?"; done         # via que SI mide
 ```
