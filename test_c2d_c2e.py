@@ -7,10 +7,13 @@ Verifica que:
 3. Los parámetros de configuración sean accesibles
 4. La estructura de datos retornada sea correcta
 
-NO requiere BD activa — solo valida estructura del código.
+NO requiere BD activa — solo valida estructura del código con `assert`.
+El test de estructura sobre BD real es un SKIP declarado (pytest.skip), no un pass.
 """
 import os
 import sys
+
+import pytest
 
 
 def test_imports():
@@ -18,7 +21,7 @@ def test_imports():
     print("[TEST 1] Verificando imports...")
 
     try:
-        from discard_queries import (
+        from discard_queries import (  # noqa: F401
             get_discards_summary,
             get_discards_detail,
             CS_DISCARD_STALE_DAYS,
@@ -30,33 +33,22 @@ def test_imports():
         print(f"  [OK] CS_DISCARD_PROMO_OCCURRENCES = {CS_DISCARD_PROMO_OCCURRENCES}")
         print(f"  [OK] CS_DISCARD_PROMO_AGENTS = {CS_DISCARD_PROMO_AGENTS}")
     except ImportError as e:
-        print(f"  [ERROR] Import de discard_queries fallo: {e}")
-        return False
+        raise AssertionError(f"Import de discard_queries fallo: {e}")
 
     try:
-        from humandato_queries import get_all_alerts
+        from humandato_queries import get_all_alerts  # noqa: F401
         print("  [OK] humandato_queries.get_all_alerts disponible")
     except ImportError as e:
-        print(f"  [ERROR] Import de humandato_queries fallo: {e}")
-        return False
+        raise AssertionError(f"Import de humandato_queries fallo: {e}")
 
-    try:
-        import server
-        print("  [OK] server.py importado correctamente")
-
-        # Verificar que cs_get_discards esté definido
-        if hasattr(server, 'cs_get_discards'):
-            print("  [OK] Tool cs_get_discards definido en server.py")
-        else:
-            print("  [ERROR] Tool cs_get_discards NO encontrado en server.py")
-            return False
-
-    except ImportError as e:
-        print(f"  [ERROR] Import de server fallo: {e}")
-        return False
+    import server
+    assert hasattr(server, "cs_get_discards"), (
+        "Tool cs_get_discards NO encontrado en server.py"
+    )
+    print("  [OK] server.py importado correctamente")
+    print("  [OK] Tool cs_get_discards definido en server.py")
 
     print("[TEST 1] PASS\n")
-    return True
 
 
 def test_function_signatures():
@@ -66,38 +58,30 @@ def test_function_signatures():
     from discard_queries import get_discards_summary, get_discards_detail
     import inspect
 
-    # Verificar get_discards_summary
     sig = inspect.signature(get_discards_summary)
     params = list(sig.parameters.keys())
-    expected = ["project"]
-    if params == expected:
-        print(f"  [OK] get_discards_summary{sig}")
-    else:
-        print(f"  [ERROR] get_discards_summary params: esperado {expected}, obtuvo {params}")
-        return False
+    assert params == ["project"], (
+        f"get_discards_summary params: esperado ['project'], obtuvo {params}"
+    )
+    print(f"  [OK] get_discards_summary{sig}")
 
-    # Verificar get_discards_detail
     sig = inspect.signature(get_discards_detail)
     params = list(sig.parameters.keys())
-    expected = ["reason", "status", "project", "limit"]
-    if params == expected:
-        print(f"  [OK] get_discards_detail{sig}")
-    else:
-        print(f"  [ERROR] get_discards_detail params: esperado {expected}, obtuvo {params}")
-        return False
+    assert params == ["reason", "status", "project", "limit"], (
+        f"get_discards_detail params: esperado ['reason', 'status', 'project', 'limit'], "
+        f"obtuvo {params}"
+    )
+    print(f"  [OK] get_discards_detail{sig}")
 
     print("[TEST 2] PASS\n")
-    return True
 
 
 def test_alerts_structure():
-    """Verifica que get_all_alerts retorne estructura esperada con discards."""
-    print("[TEST 3] Verificando estructura de get_all_alerts...")
-    print("  [INFO] Este test requiere conexión a BD — SKIPPED")
-    print("  [INFO] Para testear con BD real, ejecutar:")
-    print("         python -c 'from humandato_queries import get_all_alerts; print(get_all_alerts())'")
-    print("[TEST 3] SKIPPED\n")
-    return True
+    """Estructura de get_all_alerts con BD real. SKIP declarado."""
+    pytest.skip(
+        "Requiere conexion a BD real para get_all_alerts(); no es fixture "
+        "auto-construible en la suite. Listado en SOL return-vs-assert."
+    )
 
 
 def test_config_overrides():
@@ -119,42 +103,35 @@ def test_config_overrides():
     import discard_queries
     importlib.reload(discard_queries)
 
-    if discard_queries.CS_DISCARD_STALE_DAYS == 14:
+    try:
+        assert discard_queries.CS_DISCARD_STALE_DAYS == 14, (
+            f"CS_DISCARD_STALE_DAYS: esperado 14, obtuvo {discard_queries.CS_DISCARD_STALE_DAYS}"
+        )
         print("  [OK] CS_DISCARD_STALE_DAYS configurable via env")
-    else:
-        print(f"  [ERROR] CS_DISCARD_STALE_DAYS: esperado 14, obtuvo {discard_queries.CS_DISCARD_STALE_DAYS}")
-        return False
 
-    if discard_queries.CS_DISCARD_PROMO_OCCURRENCES == 5:
+        assert discard_queries.CS_DISCARD_PROMO_OCCURRENCES == 5, (
+            f"CS_DISCARD_PROMO_OCCURRENCES: esperado 5, obtuvo {discard_queries.CS_DISCARD_PROMO_OCCURRENCES}"
+        )
         print("  [OK] CS_DISCARD_PROMO_OCCURRENCES configurable via env")
-    else:
-        print(f"  [ERROR] CS_DISCARD_PROMO_OCCURRENCES: esperado 5, obtuvo {discard_queries.CS_DISCARD_PROMO_OCCURRENCES}")
-        return False
 
-    if discard_queries.CS_DISCARD_PROMO_AGENTS == 3:
+        assert discard_queries.CS_DISCARD_PROMO_AGENTS == 3, (
+            f"CS_DISCARD_PROMO_AGENTS: esperado 3, obtuvo {discard_queries.CS_DISCARD_PROMO_AGENTS}"
+        )
         print("  [OK] CS_DISCARD_PROMO_AGENTS configurable via env")
-    else:
-        print(f"  [ERROR] CS_DISCARD_PROMO_AGENTS: esperado 3, obtuvo {discard_queries.CS_DISCARD_PROMO_AGENTS}")
-        return False
-
-    # Restaurar valores originales
-    if original_stale:
-        os.environ["CS_DISCARD_STALE_DAYS"] = original_stale
-    else:
-        del os.environ["CS_DISCARD_STALE_DAYS"]
-
-    if original_promo_occ:
-        os.environ["CS_DISCARD_PROMO_OCCURRENCES"] = original_promo_occ
-    else:
-        del os.environ["CS_DISCARD_PROMO_OCCURRENCES"]
-
-    if original_promo_ag:
-        os.environ["CS_DISCARD_PROMO_AGENTS"] = original_promo_ag
-    else:
-        del os.environ["CS_DISCARD_PROMO_AGENTS"]
+    finally:
+        # Restaurar valores originales SIEMPRE (aunque un assert falle)
+        for var, original in (
+            ("CS_DISCARD_STALE_DAYS", original_stale),
+            ("CS_DISCARD_PROMO_OCCURRENCES", original_promo_occ),
+            ("CS_DISCARD_PROMO_AGENTS", original_promo_ag),
+        ):
+            if original is not None:
+                os.environ[var] = original
+            else:
+                os.environ.pop(var, None)
+        importlib.reload(discard_queries)
 
     print("[TEST 4] PASS\n")
-    return True
 
 
 def main():
@@ -171,23 +148,29 @@ def main():
         test_config_overrides,
     ]
 
-    results = []
+    passed = skipped = failed = 0
     for test in tests:
         try:
-            results.append(test())
-        except Exception as e:
+            test()
+            passed += 1
+        except pytest.skip.Exception as e:
+            skipped += 1
+            print(f"[SKIP] {test.__name__}: {e}\n")
+        except AssertionError as e:
+            failed += 1
+            print(f"  [ERROR] {e}")
+        except Exception as e:  # noqa: BLE001
+            failed += 1
             print(f"[EXCEPCIÓN] {test.__name__}: {e}")
-            results.append(False)
 
     print("=" * 60)
-    print(f"RESULTADO: {sum(results)}/{len(results)} tests pasaron")
+    print(f"RESULTADO: {passed} pass / {skipped} skip / {failed} fail")
 
-    if all(results):
+    if failed == 0:
         print("STATUS: PASS — Implementación C2d + C2e validada")
         return 0
-    else:
-        print("STATUS: FAIL — Revisar errores arriba")
-        return 1
+    print("STATUS: FAIL — Revisar errores arriba")
+    return 1
 
 
 if __name__ == "__main__":
