@@ -16,6 +16,10 @@ Cubre:
      rastro en la tabla.
 
 Requiere BD. NO deja escrituras.
+
+Las comprobaciones se hacen con `assert`: un fallo LADRA (excepcion) tanto bajo
+pytest como al correr el archivo como script. Antes retornaban bool, que pytest
+ignora -> el test pasaba aunque el invariante fallara (verde que no mide).
 """
 import sys
 import uuid
@@ -32,11 +36,10 @@ import humandato_queries as hq  # noqa: E402
 
 def test_fuente_es_db():
     directivas, fuente = hq.load_vcm_directives()
-    if fuente != "db":
-        print(f"  [ERROR] fuente='{fuente}', esperado 'db' (la tabla no se esta leyendo)")
-        return False
+    assert fuente == "db", (
+        f"fuente='{fuente}', esperado 'db' (la tabla no se esta leyendo)"
+    )
     print(f"  [OK] fuente='db': {len(directivas)} directivas leidas de graph_vcmdirective")
-    return True
 
 
 def test_paridad_con_tabla():
@@ -52,12 +55,11 @@ def test_paridad_con_tabla():
     en_tabla = {r.name for r in rows}
     en_memoria = {d["name"] for d in directivas}
 
-    if en_tabla != en_memoria:
-        print(f"  [ERROR] divergencia: tabla-memoria={en_tabla - en_memoria}, "
-              f"memoria-tabla={en_memoria - en_tabla}")
-        return False
+    assert en_tabla == en_memoria, (
+        f"divergencia: tabla-memoria={en_tabla - en_memoria}, "
+        f"memoria-tabla={en_memoria - en_tabla}"
+    )
     print(f"  [OK] paridad {len(en_tabla)}/{len(en_memoria)} vigentes (revoked_at IS NULL)")
-    return True
 
 
 def test_fallback_declarado():
@@ -69,14 +71,13 @@ def test_fallback_declarado():
     finally:
         hq.VCM_LOAD_SQL = original
 
-    if fuente != "fallback":
-        print(f"  [ERROR] con la tabla ausente, fuente='{fuente}' (esperado 'fallback')")
-        return False
-    if directivas is not hq.VCM_DIRECTIVES_FALLBACK:
-        print("  [ERROR] el fallback no devolvio la constante local")
-        return False
+    assert fuente == "fallback", (
+        f"con la tabla ausente, fuente='{fuente}' (esperado 'fallback')"
+    )
+    assert directivas is hq.VCM_DIRECTIVES_FALLBACK, (
+        "el fallback no devolvio la constante local"
+    )
     print(f"  [OK] tabla ausente -> fallback declarado ({len(directivas)} directivas)")
-    return True
 
 
 def test_contrafactual_rollback():
@@ -89,7 +90,6 @@ def test_contrafactual_rollback():
     directiva = "CONTRAFACTUAL: no debe existir en el grafo"
 
     antes = hq.get_missing_vaccines(None)
-    ok = True
 
     session = db.get_session()
     try:
@@ -114,17 +114,17 @@ def test_contrafactual_rollback():
         # La sesion se inyecta: recorre la cadena completa tabla -> ladrido.
         durante = hq.get_missing_vaccines(None, session=session)
         ladro = directiva in {v["directive"] for v in durante}
-
-        if ladro:
-            print(f"  [OK] vacuna imposible insertada -> LADRA "
-                  f"({len(antes)} -> {len(durante)} faltantes)")
-        else:
-            ok = False
-            print("  [ERROR] vacuna imposible insertada y NO ladro: "
-                  "el matcher esta roto (un cero suyo no seria evidencia)")
+        n_durante = len(durante)
     finally:
         session.rollback()  # nada se commitea
         session.close()
+
+    assert ladro, (
+        "vacuna imposible insertada y NO ladro: el matcher esta roto "
+        "(un cero suyo no seria evidencia)"
+    )
+    print(f"  [OK] vacuna imposible insertada -> LADRA "
+          f"({len(antes)} -> {n_durante} faltantes)")
 
     # Post-rollback: ni rastro en la tabla, y las alertas vuelven a su estado
     despues = hq.get_missing_vaccines(None)
@@ -137,32 +137,37 @@ def test_contrafactual_rollback():
     finally:
         session.close()
 
-    if quedan != 0:
-        print(f"  [ERROR] el rollback dejo rastro: {quedan} fila(s) de '{nombre}'")
-        return False
-
-    if {v["directive"] for v in antes} != {v["directive"] for v in despues}:
-        print("  [ERROR] el estado de alertas no volvio a su punto de partida")
-        return False
-
+    assert quedan == 0, f"el rollback dejo rastro: {quedan} fila(s) de '{nombre}'"
+    assert {v["directive"] for v in antes} == {v["directive"] for v in despues}, (
+        "el estado de alertas no volvio a su punto de partida"
+    )
     print(f"  [OK] rollback limpio: 0 filas de control en la tabla, "
           f"alertas de vuelta a {len(despues)} faltante(s)")
-    return ok
 
 
 if __name__ == "__main__":
-    print("[TEST 1] La fuente de las vacunas es la tabla, no la constante")
-    r1 = test_fuente_es_db()
-    print("[TEST 2] Paridad memoria <-> tabla")
-    r2 = test_paridad_con_tabla()
-    print("[TEST 3] Fallback declarado si la tabla no esta")
-    r3 = test_fallback_declarado()
-    print("[TEST 4] Contrafactual con rollback (un cero sin contrafactual no es evidencia)")
-    r4 = test_contrafactual_rollback()
+    _tests = [
+        ("[TEST 1] La fuente de las vacunas es la tabla, no la constante",
+         test_fuente_es_db),
+        ("[TEST 2] Paridad memoria <-> tabla",
+         test_paridad_con_tabla),
+        ("[TEST 3] Fallback declarado si la tabla no esta",
+         test_fallback_declarado),
+        ("[TEST 4] Contrafactual con rollback (un cero sin contrafactual no es evidencia)",
+         test_contrafactual_rollback),
+    ]
+    _fallidos = 0
+    for _titulo, _fn in _tests:
+        print(_titulo)
+        try:
+            _fn()
+        except AssertionError as _e:
+            _fallidos += 1
+            print(f"  [ERROR] {_e}")
 
     print()
-    if all([r1, r2, r3, r4]):
+    if _fallidos == 0:
         print("[OK] Todos los tests pasaron")
         sys.exit(0)
-    print("[ERROR] Hay tests fallidos")
+    print(f"[ERROR] {_fallidos} test(s) fallidos")
     sys.exit(1)
