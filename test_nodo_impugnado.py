@@ -17,9 +17,17 @@ Contrato que se verifica (tres valores, nunca null):
     {error: ...}  -> NO se pudo preguntar
 
 Requiere BD (lectura pura). NO escribe.
+
+Estado (SOL return-vs-assert, 2026-09-19): las pruebas que dependen de un fixture
+volatil en la base VIVA (nodo A del handoff; presencia de un nodo impugnado) hacen
+`pytest.skip` RUIDOSO nombrando el fixture ausente, en vez de retornar bool (que
+pytest ignoraba -> falso verde). Migraran a `assert` con fixture sembrado cuando
+exista la base de prueba (concept_sediment_test). Las que fuerzan su propio estado
+(contrafactual del canal ciego, oraculo de nodo limpio) SI afirman.
 """
 import sys
 
+import pytest
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -58,30 +66,33 @@ def _oraculo_limpio():
 
 
 def test_impugnado_se_declara():
-    """El nodo con retador VIVO debe llegar marcado por el canal de busqueda."""
+    """El nodo con retador VIVO debe llegar marcado por el canal de busqueda.
+
+    DATA-DEPENDIENTE: exige el nodo A del handoff vivo e impugnado. SKIP hasta
+    fixture en base de prueba (ver SOL return-vs-assert).
+    """
     res = queries.search_concepts_by_text(FRAGMENTO_NODO_A, limit=3)
     if not res:
-        print("  [ERROR] el nodo A del handoff no esta en el grafo (no concluyente)")
-        return False
+        pytest.skip(
+            f"fixture ausente: nodo A del handoff ('{FRAGMENTO_NODO_A}') no esta "
+            "en el grafo vivo. Requiere sembrar nodo A impugnado por B en base de "
+            "prueba. Ver SOL return-vs-assert."
+        )
 
     nodo = res[0]
     flag = nodo.get("contested", "AUSENTE")
 
-    if flag == "AUSENTE":
-        print("  [ERROR] el resultado no trae el campo `contested`")
-        return False
-    if flag is False:
-        print("  [ERROR] nodo con contradicts entrante servido como LIMPIO "
-              "(el bug del handoff, intacto)")
-        return False
-    if not isinstance(flag, dict) or not flag.get("by_active"):
-        print(f"  [ERROR] impugnacion viva no declarada en by_active: {flag!r}")
-        return False
+    assert flag != "AUSENTE", "el resultado no trae el campo `contested`"
+    assert flag is not False, (
+        "nodo con contradicts entrante servido como LIMPIO (el bug del handoff, intacto)"
+    )
+    assert isinstance(flag, dict) and flag.get("by_active"), (
+        f"impugnacion viva no declarada en by_active: {flag!r}"
+    )
 
     print(f"  [OK] '{nodo['name'][:60]}...'")
     print(f"  [OK] contested.by_active = {flag['by_active']}")
     print("  [OK] quien BUSCA ya recibe la senal que antes solo veia quien NAVEGA")
-    return True
 
 
 def test_limpio_no_se_marca():
@@ -92,23 +103,26 @@ def test_limpio_no_se_marca():
     """
     nombre = _oraculo_limpio()
     if not nombre:
-        print("  [ERROR] el oraculo no hallo ningun concepto limpio (no concluyente)")
-        return False
+        pytest.skip(
+            "fixture ausente: el oraculo no hallo ningun concepto activo limpio "
+            "en el grafo. Ver SOL return-vs-assert."
+        )
 
     res = queries.search_concepts_by_text(nombre, limit=1)
     if not res:
-        print(f"  [ERROR] no se recupero el control '{nombre[:40]}' (no concluyente)")
-        return False
+        pytest.skip(
+            f"fixture ausente: no se recupero el control limpio '{nombre[:40]}' "
+            "por el canal de busqueda. Ver SOL return-vs-assert."
+        )
 
     flag = res[0].get("contested", "AUSENTE")
-    if flag is not False:
-        print(f"  [ERROR] concepto limpio marcado como impugnado: {flag!r}")
-        print("  [ERROR] la bandera esta siempre encendida: el otro test no mide nada")
-        return False
+    assert flag is False, (
+        f"concepto limpio marcado como impugnado: {flag!r}. "
+        "La bandera estaria siempre encendida: el otro test no mediria nada."
+    )
 
     print(f"  [OK] control limpio '{nombre[:55]}' -> contested=False")
     print("  [OK] la bandera discrimina: no esta encendida por default")
-    return True
 
 
 def test_fallo_no_se_lee_como_limpio():
@@ -117,6 +131,8 @@ def test_fallo_no_se_lee_como_limpio():
     Es el bug H1 en miniatura (auditoria 2026-07-14): un fallo de
     infraestructura entregado como vacio se lee como "no existe". Un LLM lee
     `false`/`null` como "no hay disputa". El caso de fallo tiene que ser ruidoso.
+
+    DATA-DEPENDIENTE: ejercita el camino sobre el nodo A. SKIP hasta fixture.
     """
     original = queries._fetch_contested
     queries._fetch_contested = lambda session, ids: None  # "no pude preguntar"
@@ -126,45 +142,52 @@ def test_fallo_no_se_lee_como_limpio():
         queries._fetch_contested = original
 
     if not res:
-        print("  [ERROR] sin resultados (no concluyente)")
-        return False
+        pytest.skip(
+            f"fixture ausente: nodo A ('{FRAGMENTO_NODO_A}') no esta en el grafo "
+            "vivo para ejercitar el camino de fallo. Ver SOL return-vs-assert."
+        )
 
     flag = res[0].get("contested", "AUSENTE")
-    if flag is False or flag is None or flag == "AUSENTE":
-        print(f"  [ERROR] verificacion caida entregada como {flag!r}: el consumidor "
-              "no puede distinguir 'limpio' de 'no pude preguntar'")
-        return False
-    if not isinstance(flag, dict) or "error" not in flag:
-        print(f"  [ERROR] fallo sin campo `error` explicito: {flag!r}")
-        return False
+    assert flag not in (False, None, "AUSENTE"), (
+        f"verificacion caida entregada como {flag!r}: el consumidor no puede "
+        "distinguir 'limpio' de 'no pude preguntar'"
+    )
+    assert isinstance(flag, dict) and "error" in flag, (
+        f"fallo sin campo `error` explicito: {flag!r}"
+    )
 
     print(f"  [OK] verificacion caida -> contested.error = '{flag['error']}'")
     print("  [OK] falla ruidoso, no falsy: no se lee como 'limpio'")
-    return True
 
 
 def test_contexto_de_sesion_tambien_avisa():
-    """El tool que TODO agente lee al abrir sesion no puede ser el punto ciego."""
+    """El tool que TODO agente lee al abrir sesion no puede ser el punto ciego.
+
+    DATA-DEPENDIENTE: exige que exista un nodo impugnado vivo en el proyecto.
+    SKIP hasta fixture en base de prueba (ver SOL return-vs-assert).
+    """
     md = queries.get_session_context_data(
         project="concept-sediment", domains=None, limit=50, output_format="markdown"
     )
     if "[IMPUGNADO]" not in md:
-        print("  [ERROR] cs_get_session_context no marca ningun nodo impugnado")
-        print("  [ERROR] el canal de consumo mas ancho sigue ciego")
-        return False
+        pytest.skip(
+            "fixture ausente: no hay ningun nodo impugnado vivo en project "
+            "'concept-sediment' (top 50) para marcar. Requiere sembrar un nodo con "
+            "contradicts entrante en base de prueba. Ver SOL return-vs-assert."
+        )
 
     marcados = [ln.strip() for ln in md.splitlines() if "[IMPUGNADO] por:" in ln]
+    assert marcados, "hay '[IMPUGNADO]' en el md pero ninguna linea '[IMPUGNADO] por:'"
     print(f"  [OK] contexto de sesion marca {len(marcados)} nodo(s) impugnado(s)")
     for m in marcados[:2]:
         print(f"       {m[:100]}")
-    return True
 
 
 def test_contexto_declara_su_propia_ceguera():
     """CONTRAFACTUAL del anterior: si la verificacion cae, el markdown lo dice.
 
     Si no, un contexto sin marcas se lee como "nada impugnado" cuando en verdad
-    es "no se pudo mirar".
+    es "no se pudo mirar". Determinista: fuerza el fallo con monkeypatch.
     """
     original = queries._fetch_contested
     queries._fetch_contested = lambda session, ids: None
@@ -175,34 +198,43 @@ def test_contexto_declara_su_propia_ceguera():
     finally:
         queries._fetch_contested = original
 
-    if "[IMPUGNADO]" in md:
-        print("  [ERROR] la verificacion cayo y aun asi hay marcas (imposible)")
-        return False
-    if "No se pudo verificar impugnaciones" not in md:
-        print("  [ERROR] verificacion caida y el markdown NO lo declara: se lee "
-              "como 'ningun nodo impugnado'")
-        return False
+    assert "[IMPUGNADO]" not in md, (
+        "la verificacion cayo y aun asi hay marcas (imposible)"
+    )
+    assert "No se pudo verificar impugnaciones" in md, (
+        "verificacion caida y el markdown NO lo declara: se lee como 'ningun nodo impugnado'"
+    )
 
     print("  [OK] verificacion caida -> '[AVISO] No se pudo verificar impugnaciones...'")
     print("  [OK] el silencio viene declarado como silencio, no como limpieza")
-    return True
 
 
 if __name__ == "__main__":
-    print("[1] El nodo con retador vivo se declara impugnado")
-    r1 = test_impugnado_se_declara()
-    print("[2] CONTRAFACTUAL: el nodo limpio NO se marca")
-    r2 = test_limpio_no_se_marca()
-    print("[3] La verificacion caida no se lee como 'limpio'")
-    r3 = test_fallo_no_se_lee_como_limpio()
-    print("[4] cs_get_session_context tambien avisa")
-    r4 = test_contexto_de_sesion_tambien_avisa()
-    print("[5] CONTRAFACTUAL: el contexto declara su propia ceguera")
-    r5 = test_contexto_declara_su_propia_ceguera()
+    _tests = [
+        ("[1] El nodo con retador vivo se declara impugnado",
+         test_impugnado_se_declara),
+        ("[2] CONTRAFACTUAL: el nodo limpio NO se marca",
+         test_limpio_no_se_marca),
+        ("[3] La verificacion caida no se lee como 'limpio'",
+         test_fallo_no_se_lee_como_limpio),
+        ("[4] cs_get_session_context tambien avisa",
+         test_contexto_de_sesion_tambien_avisa),
+        ("[5] CONTRAFACTUAL: el contexto declara su propia ceguera",
+         test_contexto_declara_su_propia_ceguera),
+    ]
+    passed = skipped = failed = 0
+    for _titulo, _fn in _tests:
+        print(_titulo)
+        try:
+            _fn()
+            passed += 1
+        except pytest.skip.Exception as _e:
+            skipped += 1
+            print(f"  [SKIP] {_e}")
+        except AssertionError as _e:
+            failed += 1
+            print(f"  [ERROR] {_e}")
 
     print()
-    if all([r1, r2, r3, r4, r5]):
-        print("[OK] Todos los tests pasaron")
-        sys.exit(0)
-    print("[ERROR] Hay tests fallidos")
-    sys.exit(1)
+    print(f"RESULTADO: {passed} pass / {skipped} skip / {failed} fail")
+    sys.exit(0 if failed == 0 else 1)

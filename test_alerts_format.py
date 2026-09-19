@@ -215,7 +215,7 @@ CASOS = [
 
 
 def test_formateador():
-    ok = True
+    fallos = []
     for titulo, alerts, esperados, prohibidos in CASOS:
         salida = format_alerts(alerts)
         faltan = [e for e in esperados if e not in salida]
@@ -224,20 +224,23 @@ def test_formateador():
         if not faltan and not sobran:
             print(f"  [OK] {titulo}")
         else:
-            ok = False
             print(f"  [ERROR] {titulo}")
             if faltan:
                 print(f"      falta en la salida: {faltan}")
             if sobran:
                 print(f"      NO deberia aparecer: {sobran}")
             print(f"      salida: {salida!r:.180}")
-    return ok
+            fallos.append(titulo)
+
+    assert not fallos, f"casos que fallaron: {fallos}"
 
 
 if __name__ == "__main__":
     print("[TEST] Formateador de alertas: nada no-critico puede quedar mudo")
-    if test_formateador():
-        print("\n[OK] Todos los tests pasaron")
-        sys.exit(0)
-    print("\n[ERROR] Hay tests fallidos")
-    sys.exit(1)
+    try:
+        test_formateador()
+    except AssertionError as e:
+        print(f"\n[ERROR] Hay tests fallidos: {e}")
+        sys.exit(1)
+    print("\n[OK] Todos los tests pasaron")
+    sys.exit(0)

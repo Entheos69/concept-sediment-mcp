@@ -12,6 +12,7 @@ Requiere BD (lectura pura, sin escrituras).
 """
 import sys
 
+import pytest
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -68,21 +69,16 @@ ESPERADO = {
 def test_scope_project_specific():
     original = hq.load_vcm_directives
     hq.load_vcm_directives = lambda session=None: (CONTROLES, "test")
-    ok = True
     try:
         for project, esperado in ESPERADO.items():
             ladran = {v["category"] for v in hq.get_missing_vaccines(project)}
-            if ladran == esperado:
-                print(f"  [OK] project={project!r}: ladran {sorted(ladran)}")
-            else:
-                ok = False
-                print(
-                    f"  [ERROR] project={project!r}: esperado {sorted(esperado)}, "
-                    f"obtenido {sorted(ladran)}"
-                )
+            assert ladran == esperado, (
+                f"project={project!r}: esperado {sorted(esperado)}, "
+                f"obtenido {sorted(ladran)}"
+            )
+            print(f"  [OK] project={project!r}: ladran {sorted(ladran)}")
     finally:
         hq.load_vcm_directives = original
-    return ok
 
 
 def test_sin_falsos_positivos_reales():
@@ -96,7 +92,6 @@ def test_sin_falsos_positivos_reales():
         return {v["directive"] for v in hq.get_missing_vaccines(project)}
 
     sin_proyecto = ladran(None)
-    ok = True
 
     directivas, _ = hq.load_vcm_directives()
     for vcm in directivas:
@@ -106,16 +101,12 @@ def test_sin_falsos_positivos_reales():
         ladra_sin = vcm["directive"] in sin_proyecto
         ladra_en_todos = all(vcm["directive"] in ladran(p) for p in aplicables)
 
-        if ladra_sin == ladra_en_todos:
-            estado = "ladra" if ladra_sin else "satisfecha"
-            print(f"  [OK] {vcm['name']!r} ({estado}): coherente sin proyecto vs {aplicables}")
-        else:
-            ok = False
-            print(
-                f"  [ERROR] {vcm['name']!r}: sin proyecto ladra={ladra_sin}, "
-                f"pero en {aplicables} ladra={ladra_en_todos}"
-            )
-    return ok
+        assert ladra_sin == ladra_en_todos, (
+            f"{vcm['name']!r}: sin proyecto ladra={ladra_sin}, "
+            f"pero en {aplicables} ladra={ladra_en_todos}"
+        )
+        estado = "ladra" if ladra_sin else "satisfecha"
+        print(f"  [OK] {vcm['name']!r} ({estado}): coherente sin proyecto vs {aplicables}")
 
 
 def test_reason_distingue_decaido_de_ausente():
@@ -125,9 +116,17 @@ def test_reason_distingue_decaido_de_ausente():
     segundo: SI hay representacion, esta dormida. Son acciones distintas
     (sedimentar de cero vs. reconsolidar).
 
-    No escribe en BD: apunta una vacuna sintetica a un concepto que ya esta
-    dormant en el grafo, con un min_weight inalcanzable.
+    DATA-DEPENDIENTE: el caso 'decaido' apunta a un concepto que debe estar dormant
+    en el grafo ('Deriva de dependencias sin pin'). Contra la base viva ese estado
+    es un blanco movil (CodeCS puede revivirlo). SKIP ruidoso hasta que exista la
+    base de prueba con el fixture sembrado (concept_sediment_test). Ver SOL
+    return-vs-assert. El caso 'ausente' es determinista y migrara junto con este.
     """
+    pytest.skip(
+        "fixture ausente: requiere un concepto dormant de control "
+        "('Deriva de dependencias sin pin') sembrado en base de prueba; "
+        "contra la base viva es blanco movil. Ver SOL return-vs-assert."
+    )
     controles = [
         # Concepto que existe y esta dormant (fractura conocida del grafo).
         {
@@ -187,15 +186,27 @@ def test_reason_distingue_decaido_de_ausente():
 
 
 if __name__ == "__main__":
-    print("[TEST 1] Scope de vacunas project_specific (controles)")
-    r1 = test_scope_project_specific()
-    print("[TEST 2] Sin falsos positivos con directivas reales")
-    r2 = test_sin_falsos_positivos_reales()
-    print("[TEST 3] El motivo distingue decaido de ausente")
-    r3 = test_reason_distingue_decaido_de_ausente()
+    _tests = [
+        ("[TEST 1] Scope de vacunas project_specific (controles)",
+         test_scope_project_specific),
+        ("[TEST 2] Sin falsos positivos con directivas reales",
+         test_sin_falsos_positivos_reales),
+        ("[TEST 3] El motivo distingue decaido de ausente",
+         test_reason_distingue_decaido_de_ausente),
+    ]
+    passed = skipped = failed = 0
+    for _titulo, _fn in _tests:
+        print(_titulo)
+        try:
+            _fn()
+            passed += 1
+        except pytest.skip.Exception as _e:
+            skipped += 1
+            print(f"  [SKIP] {_e}")
+        except AssertionError as _e:
+            failed += 1
+            print(f"  [ERROR] {_e}")
+
     print()
-    if r1 and r2 and r3:
-        print("[OK] Todos los tests pasaron")
-        sys.exit(0)
-    print("[ERROR] Hay tests fallidos")
-    sys.exit(1)
+    print(f"RESULTADO: {passed} pass / {skipped} skip / {failed} fail")
+    sys.exit(0 if failed == 0 else 1)
