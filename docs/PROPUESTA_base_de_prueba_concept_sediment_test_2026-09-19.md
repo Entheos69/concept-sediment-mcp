@@ -48,17 +48,27 @@ que escribe-con-rollback en vivo): no dejar el precedente de escritura en vivo.
 - Semilla determinista: nombres `zzz-fixture-*` reservados, para no colisionar con
   datos reales aunque la base test se poblara alguna vez.
 
-## 4. Como se cablea
+## 4. Como se cablea -- el CANDADO (pieza no-negociable, 3 condiciones del Guardian)
 
-- Nueva env var **`DATABASE_URL_TEST`** (solo local/CI, apuntando a
-  `.../concept_sediment_test`), NUNCA en el servicio `mcp-server` de Railway.
-- **conftest.py** al iniciar la sesion de pytest: si `DATABASE_URL_TEST` esta,
-  exporta `DATABASE_URL=$DATABASE_URL_TEST` **antes** de que `db.py` construya el
-  engine (o resetea `db._engine`). Guardas de seguridad:
-  - abortar la suite si el nombre de base NO termina en `_test` (candado anti-prod:
-    ningun INSERT de fixture corre jamas contra `concept_sediment`).
-  - si `DATABASE_URL_TEST` no esta, los tests con fixture siguen en `skip` ruidoso
-    (comportamiento de hoy) -- degradacion segura, nunca contra prod.
+- Nueva env var **`DATABASE_URL_TEST`** (solo local/CI, apuntando a la base
+  `concept_sediment_test`), NUNCA en el servicio `mcp-server` de Railway.
+- **conftest.py** al iniciar la sesion de pytest apunta `db` a `DATABASE_URL_TEST`
+  (exporta `DATABASE_URL=$DATABASE_URL_TEST` antes de construir el engine, o resetea
+  `db._engine`). El candado tiene tres condiciones:
+
+  1. **Falla cerrada.** Si `DATABASE_URL_TEST` NO esta definida, la suite **aborta**
+     (`pytest.exit`/error de coleccion). JAMAS cae a `DATABASE_URL`. Un fallback
+     silencioso a produccion es justo el modo de falla que esto previene. (Esto
+     REVIERTE la version anterior de este doc, que degradaba a skip: descartada.)
+  2. **El candado se prueba.** Un test dedicado le pasa un nombre de base con pinta de
+     produccion (p.ej. `.../concept_sediment`) y verifica que el guard **aborta**.
+     Ademas: abortar si el nombre de base NO termina en `_test`. Un guard sin prueba es
+     otro verde que no mide.
+  3. **Aislamiento impuesto por el servidor, no por convencion.** Pedir a CodeCS/Iris
+     un **rol de BD con permisos solo sobre `concept_sediment_test`** (sin GRANT sobre
+     `concept_sediment`). Asi, aunque alguien cablee mal la variable, el servidor
+     rechaza cualquier escritura al grafo. Si no es viable, queda declarado como
+     **riesgo asumido** en la SOL.
 
 ## 5. Costo
 
