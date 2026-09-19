@@ -78,11 +78,46 @@ Pero aunque nunca se volviera error, el titular se mantiene.
 4. **Al final**, blindar: `filterwarnings = ["error::pytest.PytestReturnNotNoneWarning"]`
    en la config del repo.
 
-## Estado en concept-sediment-mcp
+## Estado en concept-sediment-mcp (CERRADO 2026-09-19)
 
-- Piloto convertido y verde real (script + pytest): test_vcm_fuente_unica.py.
-- 2 falsos verdes (nodo_impugnado, frontera) reportados, SIN tocar, en triage.
-- Blindaje filterwarnings: pendiente hasta convertir los 6 restantes.
+Los 7 archivos convertidos: determinista -> `assert`; data-dependiente de la base
+VIVA -> `pytest.skip` RUIDOSO nombrando el fixture ausente (nunca mas cuenta como
+pass). Suite: **20 passed, 7 skipped, 0 warnings**. Blindaje
+`filterwarnings=error::pytest.PytestReturnNotNoneWarning` en `pytest.ini`: el patron
+entra en rojo si reaparece.
+
+**Triage de los 2 "falsos verdes":** NO eran defecto de codigo. `frontera` H6 y
+`nodo_impugnado` t4 fallaban por blanco movil / fixtures volatiles contra la base
+viva; el codigo es correcto (verificado en vivo). No es "expectativa stale".
+
+### Lista de skips ruidosos (destino: fixture en base de prueba)
+
+| Test | Fixture ausente |
+|---|---|
+| test_smoke_exclusion_mcp.py::test_db_real_e2e | sesion smoke pre-cargada (is_test=True) |
+| test_c2d_c2e.py::test_alerts_structure | get_all_alerts() sobre BD real |
+| test_vacunas_scope.py::test_reason_distingue_decaido_de_ausente | concepto dormant de control |
+| test_nodo_impugnado.py::test_impugnado_se_declara | nodo A del handoff, impugnado |
+| test_nodo_impugnado.py::test_fallo_no_se_lee_como_limpio | nodo A del handoff |
+| test_nodo_impugnado.py::test_contexto_de_sesion_tambien_avisa | nodo impugnado vivo en el proyecto |
+| test_frontera_compute_entrega.py::{H2,H3,H6} | concepto con relaciones depth-2 / match lexico / >=5 conceptos |
+
+(H2/H3 de frontera se saltan por precondicion dentro del mismo test; cuentan como
+skip solo cuando el dato no esta.)
+
+### Cambios de test, NO de produccion
+
+- test_c2d_c2e.py::test_config_overrides: ahora restaura los env vars y recarga
+  discard_queries en `finally`, para no filtrar valores custom a otros tests si un
+  assert falla. Higiene de test; ningun cambio de codigo de produccion.
+
+### Destino (metodo (b), decidido por el Guardian)
+
+Base de prueba aislada en la misma instancia Railway (`concept_sediment_test`,
+`DATABASE_URL_TEST`), donde los 7 skips pasan a `assert` con fixture sembrado
+(INSERT+rollback) y se migra ahi el contrafactual de vcm (unico que hoy escribe en
+vivo). Propuesta: `docs/PROPUESTA_base_de_prueba_concept_sediment_test_2026-09-19.md`.
+NO se acepto escribir fixtures contra la base viva.
 
 ## Deteccion en cualquier repo
 
