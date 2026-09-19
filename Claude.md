@@ -63,6 +63,15 @@ Razón: Migraciones destructivas son irreversibles en producción (PostgreSQL Ra
 - Deps de dev (para correr la suite) en `requirements-dev.txt`, NO en `requirements.txt` (runtime):
   `venv/Scripts/python -m pip install -r requirements-dev.txt` (trae pytest + pytest-timeout para `--timeout=30`).
 
+## Entorno Python
+- Intérprete del proyecto: `$CLAUDE_PROJECT_PY` (exportado por el launcher de Git Bash).
+  Si la variable está vacía, usar la ruta literal: `venv/Scripts/python.exe`.
+- Nunca `python` ni `pip` a secas: el shell de la herramienta resuelve al Python global.
+- Instalar: `"$CLAUDE_PROJECT_PY" -m pip install <paquete>`.
+  Con uv: `uv pip install --python "$CLAUDE_PROJECT_PY" <paquete>`.
+- Primera acción de cada sesión: `echo "$CLAUDE_PROJECT_PY"` y `command -v python`;
+  si difieren, usar siempre la primera.
+
 ## Señal del Guardian
 
 Si el Guardian dice **"Sube un nivel"**: detente, identifica en qué capa estás operando (implementación → diseño → arquitectura → epistemología), y responde desde una capa arriba.
